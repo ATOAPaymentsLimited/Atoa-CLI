@@ -29,7 +29,7 @@
     "@napi-rs/keyring": "^1.1.4",
     "citty": "^0.2.2",
     "cli-table3": "^0.6.5",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.1.1",
     "undici": "^6.19.0"
   },
   "devDependencies": {
