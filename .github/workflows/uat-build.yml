@@ -45,9 +45,13 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Compute artifact name
+        shell: bash
+        run: echo "ARTIFACT_NAME=atoa-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA}" >> "$GITHUB_ENV"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: atoa-${{ github.ref_name }}-${{ github.sha }}
+          name: ${{ env.ARTIFACT_NAME }}
           path: dist/atoa.exe
           retention-days: 30
