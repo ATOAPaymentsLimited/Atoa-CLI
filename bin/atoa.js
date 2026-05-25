@@ -7,7 +7,7 @@ if (maj < 20) {
   process.exit(1);
 }
 
-const {assertTlsHardenedEnv} = await import('../dist/bootstrap.js');
+const {assertTlsHardenedEnv} = require('../dist/bootstrap.js');
 try {
   assertTlsHardenedEnv();
 } catch (err) {
@@ -15,4 +15,4 @@ try {
   process.exit(1);
 }
 
-await import('../dist/cli.js');
+require('../dist/cli.js');
