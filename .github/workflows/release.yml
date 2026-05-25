@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  npm-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run build
+      - run: npm publish --provenance --access restricted
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  binaries:
+    needs: npm-publish
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - bun-darwin-arm64
+          - bun-darwin-x64
+          - bun-linux-x64
+          - bun-linux-arm64
+          - bun-windows-x64
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: oven-sh/setup-bun@v2
+      - run: npm ci
+      - run: npm run build
+      - run: bun build --compile --minify --sourcemap --target="$TARGET" ./src/cli.ts --outfile="dist/atoa-$TARGET"
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign-blob --yes "dist/atoa-$TARGET" --output-signature "dist/atoa-$TARGET.sig" --output-certificate "dist/atoa-$TARGET.pem"
+      - run: shasum -a 256 "dist/atoa-$TARGET" > "dist/atoa-$TARGET.sha256"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/atoa-${{ matrix.target }}
+            dist/atoa-${{ matrix.target }}.sig
+            dist/atoa-${{ matrix.target }}.pem
+            dist/atoa-${{ matrix.target }}.sha256

@@ -1,0 +1,61 @@
+{
+  "name": "@ATOAPaymentsLimited/atoa-cli",
+  "version": "0.1.0",
+  "description": "First-party CLI for the Atoa payment API.",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "atoa": "./bin/atoa.js"
+  },
+  "files": ["bin", "dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup",
+    "build:release": "tsup",
+    "clean": "rimraf dist",
+    "dev": "tsx src/cli.ts",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
+    "prettier": "prettier \"src/**/*.ts\" \"test/**/*.ts\" --write",
+    "prettier:check": "prettier \"src/**/*.ts\" \"test/**/*.ts\" --check",
+    "test": "vitest run --coverage",
+    "test:unit": "vitest run test/lib test/commands",
+    "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.4.3",
+    "@napi-rs/keyring": "^1.1.4",
+    "citty": "^0.2.2",
+    "cli-table3": "^0.6.5",
+    "js-yaml": "^4.1.0",
+    "undici": "^6.19.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "@vitest/coverage-v8": "^4.1.6",
+    "cross-env": "^7.0.3",
+    "msw": "^2.3.0",
+    "prettier": "^3.4.0",
+    "rimraf": "^5.0.5",
+    "tsup": "^8.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.6"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ATOAPaymentsLimited/atoa-cli.git"
+  }
+}
