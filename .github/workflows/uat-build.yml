@@ -37,7 +37,7 @@ jobs:
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           endpoint: https://weu.codesigning.azure.net/
-          trusted-signing-account-name: atoa-signing
+          trusted-signing-account-name: AtoaCLI
           certificate-profile-name: atoa-cert-profile
           files-folder: dist/
           files-folder-filter: exe
