@@ -4,13 +4,18 @@
   "description": "First-party CLI for the Atoa payment API.",
   "license": "UNLICENSED",
   "private": false,
-  "type": "module",
   "main": "./dist/index.js",
   "bin": {
     "atoa": "./bin/atoa.js"
   },
   "files": ["bin", "dist"],
   "engines": { "node": ">=20" },
+  "pkg": {
+    "scripts": "dist/**/*.js",
+    "assets": [
+      "node_modules/@napi-rs/keyring-*/**/*.node"
+    ]
+  },
   "scripts": {
     "build": "tsup",
     "build:release": "tsup",
