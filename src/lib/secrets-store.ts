@@ -163,7 +163,9 @@ const fileStore: SecretsStore = {
 
 export async function createSecretsStore(): Promise<SecretsStore> {
   try {
-    const {Entry} = await import("@napi-rs/keyring");
+    // works under pkg. `as typeof import(...)` preserves the ESM-style types.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {Entry} = require("@napi-rs/keyring") as typeof import("@napi-rs/keyring");
     // Probe to verify keychain is accessible on this platform.
     new Entry(SERVICE, "__probe__").getPassword();
     return {
