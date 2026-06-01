@@ -94,7 +94,7 @@ export function buildHttpClient(opts: {baseUrl: string; authHeader: string; verb
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30_000);
       try {
-        response = await (undiciFetch as Function)(url.toString(), {
+        response = await (undiciFetch as typeof undiciFetch)(url.toString(), {
           method: reqOpts.method,
           headers,
           body: reqOpts.body !== undefined ? JSON.stringify(reqOpts.body) : undefined,

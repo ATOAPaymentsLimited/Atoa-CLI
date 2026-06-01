@@ -21,7 +21,10 @@ export default defineCommand({
     email: {type: "string", description: "customer email (either --email or --phoneNumber is required)"},
     type: {type: "string", description: "customer type: INDIVIDUAL (default) or BUSINESS"},
     phoneCountryCode: {type: "string", description: 'phone country code, digits only e.g. "44" for UK'},
-    phoneNumber: {type: "string", description: "phone number (digits only, either --email or --phoneNumber is required)"},
+    phoneNumber: {
+      type: "string",
+      description: "phone number (digits only, either --email or --phoneNumber is required)"
+    },
     address: {type: "string", description: "street address"},
     city: {type: "string", description: "city"},
     postcode: {type: "string", description: "postal code"},

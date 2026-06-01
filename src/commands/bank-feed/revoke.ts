@@ -9,7 +9,8 @@ export default defineCommand({
   args: withCommonArgs({
     accountAuthId: {
       type: "string",
-      description: "accountAuthId to revoke a single consent. Leave unset to revoke every bank-feed consent for this merchant."
+      description:
+        "accountAuthId to revoke a single consent. Leave unset to revoke every bank-feed consent for this merchant."
     }
   }),
   run: runWithContext<RevokeArgs>(async (ctx, args) => {

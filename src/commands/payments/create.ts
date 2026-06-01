@@ -46,12 +46,13 @@ export default defineCommand({
     consumerDetails: {
       type: "string",
       description:
-        'consumer details as JSON. Fields: firstName, lastName, email, phoneCountryCode, phoneNumber. ' +
+        "consumer details as JSON. Fields: firstName, lastName, email, phoneCountryCode, phoneNumber. " +
         'E.g. \'{"firstName":"Jane","lastName":"Doe","email":"jane@example.com","phoneCountryCode":"44","phoneNumber":"7700900000"}\''
     },
     callbackParams: {
       type: "string",
-      description: 'callback params as JSON e.g. \'{"couponCode":"245561","refId":"2342"}\' — appended to the redirect URL as query params'
+      description:
+        'callback params as JSON e.g. \'{"couponCode":"245561","refId":"2342"}\' — appended to the redirect URL as query params'
     },
     expiresIn: {type: "string", description: "payment link expiry in milliseconds (default 180000 = 3 minutes)"},
     notes: {type: "string", description: "free-text notes attached to the payment"},
