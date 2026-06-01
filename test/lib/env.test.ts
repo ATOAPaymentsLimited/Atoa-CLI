@@ -29,4 +29,3 @@ describe("resolveBaseUrl", () => {
     expect(resolveBaseUrl()).toBe("https://api.example.test");
   });
 });
-

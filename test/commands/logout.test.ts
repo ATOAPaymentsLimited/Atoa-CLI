@@ -3,9 +3,15 @@ import {promises as fs} from "fs";
 import {tmpdir} from "os";
 import {join} from "path";
 
-// Force file backend for tests.
-vi.mock("@napi-rs/keyring", () => {
-  throw new Error("keyring not available in tests");
+// Force file backend in tests — mocked at the secrets-store layer because
+// the source loads @napi-rs/keyring via require(), which bypasses vi.mock.
+vi.mock("../../src/lib/secrets-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/secrets-store")>();
+  const {buildFileSecretsStore} = await import("../helpers/file-store-mock");
+  return {
+    ...actual,
+    createSecretsStore: async () => buildFileSecretsStore(actual.secretsFilePath)
+  };
 });
 
 import {secretsFilePath} from "../../src/lib/secrets-store";

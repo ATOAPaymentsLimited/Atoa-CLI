@@ -3,18 +3,16 @@ import {promises as fs} from "fs";
 import {tmpdir} from "os";
 import {join} from "path";
 
-/**
- * Profile commands read/write the local config + keychain directly (no HTTP).
- * We test them against a real tmpdir filesystem via ATOA_HOME.
- *
- * We force the FILE backend by mocking `@napi-rs/keyring` to throw on import —
- * that way `createSecretsStore` falls through its catch and returns `fileStore`
- * on every host, regardless of whether the dev machine has a real keychain.
- */
-
-// Make @napi-rs/keyring unavailable so createSecretsStore returns fileStore.
-vi.mock("@napi-rs/keyring", () => {
-  throw new Error("keyring not available in tests");
+// Profile commands read/write local config + keychain (no HTTP). Tests run
+// against a tmpdir via ATOA_HOME, and we force the file backend by mocking
+// secrets-store (vi.mock on @napi-rs/keyring doesn't apply to the require()).
+vi.mock("../../src/lib/secrets-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/secrets-store")>();
+  const {buildFileSecretsStore} = await import("../helpers/file-store-mock");
+  return {
+    ...actual,
+    createSecretsStore: async () => buildFileSecretsStore(actual.secretsFilePath)
+  };
 });
 
 import {secretsFilePath} from "../../src/lib/secrets-store";
