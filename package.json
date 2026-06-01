@@ -1,8 +1,8 @@
 {
-  "name": "@ATOAPaymentsLimited/atoa-cli",
+  "name": "@atoapayments/atoa-cli",
   "version": "0.1.0",
   "description": "First-party CLI for the Atoa payment API.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": false,
   "main": "./dist/index.js",
   "bin": {
@@ -25,6 +25,7 @@
     "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
     "prettier": "prettier \"src/**/*.ts\" \"test/**/*.ts\" --write",
     "prettier:check": "prettier \"src/**/*.ts\" \"test/**/*.ts\" --check",
+    "prepublishOnly": "npm run lint && npm run test:unit && npm run build",
     "test": "vitest run --coverage",
     "test:unit": "vitest run test/lib test/commands",
     "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration"
@@ -56,8 +57,8 @@
     "vitest": "^4.1.6"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
-    "access": "restricted"
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
   },
   "repository": {
     "type": "git",
