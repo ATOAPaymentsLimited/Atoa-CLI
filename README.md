@@ -158,10 +158,10 @@ atoa webhooks trigger PAYMENTS_STATUS --orderId order-001 --amount 25.00
 atoa webhooks trigger REFUND_STATUS --status FAILED
 
 # POS_PAYMENT_STATUS has multiple body shapes — pick one via --type
-atoa webhooks trigger POS_PAYMENT_STATUS --type payment
-atoa webhooks trigger POS_PAYMENT_STATUS --type refund --status COMPLETED
-atoa webhooks trigger POS_PAYMENT_STATUS --type expired
-atoa webhooks trigger POS_PAYMENT_STATUS --type payment \
+atoa webhooks trigger POS_PAYMENT_STATUS --type PAYMENTS_STATUS
+atoa webhooks trigger POS_PAYMENT_STATUS --type REFUND_STATUS --status COMPLETED
+atoa webhooks trigger POS_PAYMENT_STATUS --type EXPIRED_STATUS
+atoa webhooks trigger POS_PAYMENT_STATUS --type PAYMENTS_STATUS \
   --customFields '[{"value":"CUST_001","fieldName":"Customer ID"}]'
 ```
 
@@ -171,7 +171,7 @@ atoa webhooks trigger POS_PAYMENT_STATUS --type payment \
 | `--amount` | Override `paidAmount` in pounds (e.g. 10.05 for £10.05) |
 | `--paymentMethod` | `CARD` \| `PAY_BY_BANK` |
 | `--status` | `COMPLETED` \| `AUTHORIZED` \| `FAILED` \| `CANCELLED` \| `EXPIRED` (per-event validation server-side) |
-| `--type` | `POS_PAYMENT_STATUS` only — selects `payment` / `refund` / `expired` body shape |
+| `--type` | `POS_PAYMENT_STATUS` only — body shape: `PAYMENTS_STATUS` (default) / `REFUND_STATUS` / `EXPIRED_STATUS` |
 | `--customFields` | `POS_PAYMENT_STATUS` only — JSON array of `{value, fieldName}` |
 
 ### Bank feed (Open Banking)
