@@ -2,7 +2,7 @@
 
 First-party command-line interface for the [Atoa](https://paywithatoa.co.uk) payment API. Manage merchants, payments, refunds, webhooks, bank feeds, and payouts from your terminal — scriptable, secure, and consistent across `sandbox` and `production`.
 
-**Documentation:** [docs.paywithatoa.co.uk/cli](https://docs.paywithatoa.co.uk/cli)
+**Documentation:** [Atoa Docs](https://docs.atoa.me/cli)
 
 ```bash
 atoa login                                  # pair this machine with your Atoa account
@@ -407,7 +407,7 @@ atoa reset --yes && atoa login
 
 ## Documentation
 
-- **Full docs:** [docs.paywithatoa.co.uk/cli](https://docs.paywithatoa.co.uk/cli)
+- **Full docs:** [Atoa Docs](https://docs.atoa.me/cli)
 - **Built-in help:** `atoa --help`, `atoa <command> --help`, `atoa <command> <subcommand> --help` — full per-command flag list, always in sync with the binary you have installed.
 - **API reference:** see the doc site link from your Atoa Dashboard.
 

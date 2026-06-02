@@ -62,6 +62,17 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ATOAPaymentsLimited/atoa-cli.git"
-  }
+    "url": "https://github.com/ATOAPaymentsLimited/Atoa-CLI"
+  },
+  "bugs": {
+    "url": "https://github.com/ATOAPaymentsLimited/Atoa-CLI/issues",
+    "email": "hello@paywithatoa.co.uk"
+  },
+  "homepage": "https://github.com/ATOAPaymentsLimited/Atoa-CLI#readme",
+  "keywords": [
+    "atoa",
+    "atoa pay",
+    "cli",
+    "agentic payments"
+  ]
 }
