@@ -19,7 +19,5 @@ export function assertSecureBaseUrl(): void {
   const baseUrl = resolveBaseUrl();
   if (baseUrl.startsWith("https://")) return;
 
-  throw new Error(
-    `Refusing to start: BASE_URL="${baseUrl}" must be https://. Rebuild with an https:// BASE_URL.`
-  );
+  throw new Error(`Refusing to start: BASE_URL="${baseUrl}" must be https://. Rebuild with an https:// BASE_URL.`);
 }

@@ -23,6 +23,7 @@
     "max-nested-callbacks": ["error", 3],
     "complexity": ["warn", 10],
     "no-console": "off",
+    "no-constant-condition": ["error", { "checkLoops": false }],
     "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "@typescript-eslint/no-explicit-any": "warn",
     "no-restricted-imports": [

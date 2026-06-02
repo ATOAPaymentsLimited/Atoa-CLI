@@ -2,9 +2,11 @@
 
 First-party command-line interface for the [Atoa](https://paywithatoa.co.uk) payment API. Manage merchants, payments, refunds, webhooks, bank feeds, and payouts from your terminal — scriptable, secure, and consistent across `sandbox` and `production`.
 
+**Documentation:** [Atoa Docs](https://docs.atoa.me/cli)
+
 ```bash
 atoa login                                  # pair this machine with your Atoa account
-atoa payments create --amount 10.05 --orderId order-001
+atoa payments create --amount 10.05 --orderId order-001 --customerId cust_123
 atoa webhooks trigger PAYMENTS_STATUS       # fire a fake event at your sandbox URL
 ```
 
@@ -13,7 +15,7 @@ atoa webhooks trigger PAYMENTS_STATUS       # fire a fake event at your sandbox 
 ## Install
 
 ```bash
-npm install -g @ATOAPaymentsLimited/atoa-cli
+npm install -g @atoapayments/atoa-cli
 ```
 
 **Requires Node.js 20 or later** (`node --version`).
@@ -41,7 +43,7 @@ atoa whoami
 
 # 3. Try a real call
 atoa stores list
-atoa payments create --amount 10.05 --orderId test-001 --redirectUrl https://example.com
+atoa payments create --amount 10.05 --orderId test-001 --customerId cust_123 --redirectUrl https://example.com
 ```
 
 Tokens are stored in your OS keychain (Keychain on macOS, Credential Manager on Windows, libsecret on Linux). When no system keychain is available (Docker, headless CI), they fall back to a `0600`-mode JSON file at `~/.config/atoa/secrets.json`. **Tokens never touch a `.env` file or your shell history.**
@@ -91,7 +93,7 @@ Available on `atoa payments create`, `atoa refunds create`, `atoa card-on-file c
 ### Payments
 
 ```bash
-atoa payments create --amount 25.00 --orderId order-001 --redirectUrl https://shop.example.com/return
+atoa payments create --amount 25.00 --orderId order-001 --customerId cust_123 --redirectUrl https://shop.example.com/return
 atoa payments status pr_abc123 --poll
 atoa payments cancel pr_abc123 --yes
 atoa payments transactions --from 2026-01-01 --to 2026-01-31 --status COMPLETED
@@ -144,6 +146,8 @@ atoa webhooks delete wh_123 --yes
 
 `atoa webhooks trigger` fires a fake event at your registered sandbox webhook URL — same body shape and signature recipe as a production event, no real payment needed. Always uses the sandbox key, regardless of `--env`.
 
+Supported events: `PAYMENTS_STATUS`, `EXPIRED_STATUS`, `REFUND_STATUS`, `POS_PAYMENT_STATUS`.
+
 ```bash
 # Defaults — fires a PAYMENTS_STATUS event with a generated orderId
 atoa webhooks trigger PAYMENTS_STATUS
@@ -154,10 +158,10 @@ atoa webhooks trigger PAYMENTS_STATUS --orderId order-001 --amount 25.00
 atoa webhooks trigger REFUND_STATUS --status FAILED
 
 # POS_PAYMENT_STATUS has multiple body shapes — pick one via --type
-atoa webhooks trigger POS_PAYMENT_STATUS --type payment
-atoa webhooks trigger POS_PAYMENT_STATUS --type refund --status COMPLETED
-atoa webhooks trigger POS_PAYMENT_STATUS --type expired
-atoa webhooks trigger POS_PAYMENT_STATUS --type payment \
+atoa webhooks trigger POS_PAYMENT_STATUS --type PAYMENTS_STATUS
+atoa webhooks trigger POS_PAYMENT_STATUS --type REFUND_STATUS --status COMPLETED
+atoa webhooks trigger POS_PAYMENT_STATUS --type EXPIRED_STATUS
+atoa webhooks trigger POS_PAYMENT_STATUS --type PAYMENTS_STATUS \
   --customFields '[{"value":"CUST_001","fieldName":"Customer ID"}]'
 ```
 
@@ -167,7 +171,7 @@ atoa webhooks trigger POS_PAYMENT_STATUS --type payment \
 | `--amount` | Override `paidAmount` in pounds (e.g. 10.05 for £10.05) |
 | `--paymentMethod` | `CARD` \| `PAY_BY_BANK` |
 | `--status` | `COMPLETED` \| `AUTHORIZED` \| `FAILED` \| `CANCELLED` \| `EXPIRED` (per-event validation server-side) |
-| `--type` | `POS_PAYMENT_STATUS` only — selects `payment` / `refund` / `expired` body shape |
+| `--type` | `POS_PAYMENT_STATUS` only — body shape: `PAYMENTS_STATUS` (default) / `REFUND_STATUS` / `EXPIRED_STATUS` |
 | `--customFields` | `POS_PAYMENT_STATUS` only — JSON array of `{value, fieldName}` |
 
 ### Bank feed (Open Banking)
@@ -341,7 +345,7 @@ echo "$ATOA_SANDBOX_TOKEN" | atoa login --stdin --env sandbox --profile ci
 
 # 2. Make every command target the CI profile, with a stable idempotency key
 atoa --profile ci payments create \
-  --amount 10.00 --orderId "$RUN_ID" --redirectUrl https://x \
+  --amount 10.00 --orderId "$RUN_ID" --customerId cust_123 --redirectUrl https://x \
   --idempotencyKey "ci-payment/$RUN_ID" --dryRun
 
 # 3. Read-only checks
@@ -403,6 +407,7 @@ atoa reset --yes && atoa login
 
 ## Documentation
 
+- **Full docs:** [Atoa Docs](https://docs.atoa.me/cli)
 - **Built-in help:** `atoa --help`, `atoa <command> --help`, `atoa <command> <subcommand> --help` — full per-command flag list, always in sync with the binary you have installed.
 - **API reference:** see the doc site link from your Atoa Dashboard.
 
@@ -414,7 +419,7 @@ atoa reset --yes && atoa login
 atoa reset --yes                     # wipe local profiles + tokens (local only)
 atoa reset --revoke --yes            # also revoke server-side keys (best-effort)
 atoa reset --dryRun                  # preview what would be cleared without touching state
-npm uninstall -g @ATOAPaymentsLimited/atoa-cli   # remove the binary
+npm uninstall -g @atoapayments/atoa-cli   # remove the binary
 ```
 
 ---
