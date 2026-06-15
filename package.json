@@ -8,8 +8,13 @@
   "bin": {
     "atoa": "./bin/atoa.js"
   },
-  "files": ["bin", "dist"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "pkg": {
     "scripts": "dist/**/*.js",
     "assets": [
@@ -28,7 +33,8 @@
     "prepublishOnly": "npm run lint && npm run test:unit && npm run build",
     "test": "vitest run --coverage",
     "test:unit": "vitest run test/lib test/commands",
-    "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration"
+    "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
