@@ -14,16 +14,21 @@ export default defineCommand({
       const profiles = cfg.profiles;
       const store = await createSecretsStore();
       const rows = await Promise.all(
-        Object.entries(profiles).map(async ([name, p]) => ({
-          name,
-          active: name === cfg.activeProfile,
-          displayName: p.displayName,
-          defaultEnv: p.defaultEnv ?? null,
-          envs: p.envs,
-          incomplete: isProfileIncomplete(p),
-          hasSandbox: !!(await store.get(name, "sandbox")),
-          hasProduction: !!(await store.get(name, "production"))
-        }))
+        Object.entries(profiles).map(async ([name, p]) => {
+          // CLI is JWT-only and the JWT session is env-independent (keyed by profile),
+          // so token presence is a single check shared across the env columns.
+          const hasToken = !!(await store.getJwtTokens(name));
+          return {
+            name,
+            active: name === cfg.activeProfile,
+            displayName: p.displayName,
+            defaultEnv: p.defaultEnv ?? null,
+            envs: p.envs,
+            incomplete: isProfileIncomplete(p),
+            hasSandbox: hasToken,
+            hasProduction: hasToken
+          };
+        })
       );
 
       if (rows.length === 0) {

@@ -1,24 +1,53 @@
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
+type Identity = {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phoneCountryCode?: string;
+  phoneNumber?: string;
+};
+
 const mock = vi.hoisted(() => {
-  let nextIdentity: {merchantId: string; businessName: string} = {merchantId: "mid_1", businessName: "Acme Coffee"};
+  let nextIdentity: any = {
+    id: "user_1",
+    firstName: "Vignesh",
+    lastName: "K",
+    email: "v@example.com",
+    phoneCountryCode: "44",
+    phoneNumber: "7700900000"
+  };
   let lastPrinted: unknown = undefined;
+  const requests: Array<{method: string; path: string}> = [];
   return {
-    setIdentity(v: typeof nextIdentity) {
+    setIdentity(v: any) {
       nextIdentity = v;
     },
     reset() {
-      nextIdentity = {merchantId: "mid_1", businessName: "Acme Coffee"};
+      nextIdentity = {
+        id: "user_1",
+        firstName: "Vignesh",
+        lastName: "K",
+        email: "v@example.com",
+        phoneCountryCode: "44",
+        phoneNumber: "7700900000"
+      };
       lastPrinted = undefined;
+      requests.length = 0;
     },
     getPrinted() {
       return lastPrinted;
     },
+    requests,
     buildContext: async () => ({
       env: "sandbox",
       http: {
         baseUrl: "https://api.atoa.me",
-        request: async (_req: any) => ({status: 200, data: nextIdentity, requestId: "srv-req-1"})
+        request: async (req: any) => {
+          requests.push({method: req.method, path: req.path});
+          return {status: 200, data: nextIdentity, requestId: "srv-req-1"};
+        }
       },
       format: "json",
       verbose: false,
@@ -44,28 +73,37 @@ import whoami from "../../src/commands/whoami";
 beforeEach(() => mock.reset());
 
 describe("whoami", () => {
-  it("prints the active profile, env, businessName, and fingerprint", async () => {
-    mock.setIdentity({merchantId: "mid_42", businessName: "VIGNESH"});
+  it("GETs /api/user/profile/ and prints profile/business/name/email/phone", async () => {
     await (whoami.run as any)({args: {}, rawArgs: []});
+
+    expect(mock.requests).toHaveLength(1);
+    expect(mock.requests[0].path).toBe("/api/user/profile/");
 
     const out = mock.getPrinted() as Record<string, unknown>;
     expect(out.profile).toBe("vignesh");
-    expect(out.env).toBe("sandbox");
-    expect(out.businessName).toBe("VIGNESH");
-    expect(out.tokenFingerprint).toBe("…RnIs");
+    expect(out.business).toBe("Acme Coffee");
+    expect(out.name).toBe("Vignesh K");
+    expect(out.email).toBe("v@example.com");
+    expect(out.phone).toBe("+44 7700900000");
   });
 
-  it("does NOT leak businessId, sdkAccessId, or baseUrl in output (trimmed display)", async () => {
+  it("omits name and phone when identity lacks them", async () => {
+    mock.setIdentity({id: "user_2", email: "only@example.com"});
     await (whoami.run as any)({args: {}, rawArgs: []});
+
     const out = mock.getPrinted() as Record<string, unknown>;
-    expect(out).not.toHaveProperty("businessId");
-    expect(out).not.toHaveProperty("sdkAccessId");
-    expect(out).not.toHaveProperty("baseUrl");
+    expect(out.name).toBeUndefined();
+    expect(out.phone).toBeUndefined();
+    expect(out.email).toBe("only@example.com");
   });
 
-  it("includes the navigation hint pointing at `atoa profile list`", async () => {
+  it("does NOT leak env, userId, source, hint, or tokenFingerprint", async () => {
     await (whoami.run as any)({args: {}, rawArgs: []});
     const out = mock.getPrinted() as Record<string, unknown>;
-    expect(out.hint).toMatch(/atoa profile list/);
+    expect(out).not.toHaveProperty("env");
+    expect(out).not.toHaveProperty("userId");
+    expect(out).not.toHaveProperty("source");
+    expect(out).not.toHaveProperty("hint");
+    expect(out).not.toHaveProperty("tokenFingerprint");
   });
 });

@@ -4,20 +4,17 @@ import {tmpdir} from "os";
 import {join} from "path";
 
 /**
- * Profile commands read/write the local config + keychain directly (no HTTP).
+ * Profile commands read/write the local config + JWT session file directly (no HTTP).
  * We test them against a real tmpdir filesystem via ATOA_HOME.
  *
- * We force the FILE backend by mocking `@napi-rs/keyring` to throw on import —
- * that way `createSecretsStore` falls through its catch and returns `fileStore`
- * on every host, regardless of whether the dev machine has a real keychain.
+ * There is no OS keychain — `createSecretsStore()` is always the file store, and
+ * JWT sessions live in ~/.atoa/auth/session.json with shape:
+ *   {"sessions": {"<profile>": {"accessToken", "refreshToken"}}}
  */
 
-// Make @napi-rs/keyring unavailable so createSecretsStore returns fileStore.
-vi.mock("@napi-rs/keyring", () => {
-  throw new Error("keyring not available in tests");
-});
+import {sessionFilePath, authDir} from "../../src/lib/secrets-store";
 
-import {secretsFilePath} from "../../src/lib/secrets-store";
+type Session = {accessToken: string; refreshToken: string};
 
 let scratch: string;
 const configPath = () => join(scratch, ".config", "atoa", "config.json");
@@ -31,9 +28,14 @@ async function readConfig(): Promise<any> {
   return JSON.parse(await fs.readFile(configPath(), "utf8"));
 }
 
-async function readSecrets(): Promise<Record<string, string>> {
+async function writeSessions(sessions: Record<string, Session>): Promise<void> {
+  await fs.mkdir(authDir(), {recursive: true, mode: 0o700});
+  await fs.writeFile(sessionFilePath(), JSON.stringify({sessions}), {mode: 0o600});
+}
+
+async function readSessions(): Promise<Record<string, Session>> {
   try {
-    return JSON.parse(await fs.readFile(secretsFilePath(), "utf8"));
+    return JSON.parse(await fs.readFile(sessionFilePath(), "utf8")).sessions ?? {};
   } catch {
     return {};
   }
@@ -364,15 +366,16 @@ describe("profile rename", () => {
     stdout.mockRestore();
   });
 
-  it("renames + re-keys keychain slots with --yes", async () => {
+  it("renames the profile and clears the old JWT session with --yes", async () => {
     await writeConfig({
       schemaVersion: 1,
       activeProfile: "acme",
-      profiles: {acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x"}}}}
+      profiles: {
+        acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x", authMode: "jwt"}}}
+      }
     });
-    // Pre-stage a token
-    await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-    await fs.writeFile(secretsFilePath(), JSON.stringify({"acme:sandbox": "sb-token"}), {mode: 0o600});
+    // Pre-stage a JWT session under the old name.
+    await writeSessions({acme: {accessToken: "at", refreshToken: "rt"}});
 
     await (rename.run as any)({args: {oldName: "acme", newName: "acme-uk", yes: true}, rawArgs: []});
     const cfg = await readConfig();
@@ -380,9 +383,9 @@ describe("profile rename", () => {
     expect(cfg.profiles).not.toHaveProperty("acme");
     expect(cfg.activeProfile).toBe("acme-uk"); // pointer follows
 
-    const secrets = await readSecrets();
-    expect(secrets["acme-uk:sandbox"]).toBe("sb-token");
-    expect(secrets["acme:sandbox"]).toBeUndefined();
+    // The old session is swept up; user re-logs in under the new name.
+    const sessions = await readSessions();
+    expect(sessions.acme).toBeUndefined();
   });
 
   it("no-op when oldName === newName", async () => {
@@ -415,32 +418,32 @@ describe("profile delete", () => {
     stdout.mockRestore();
   });
 
-  it("--yes removes config entry and clears slots", async () => {
+  it("--yes removes config entry and clears the JWT session", async () => {
     await writeConfig({
       schemaVersion: 1,
-      profiles: {acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x"}}}}
+      profiles: {
+        acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x", authMode: "jwt"}}}
+      }
     });
-    await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-    await fs.writeFile(secretsFilePath(), JSON.stringify({"acme:sandbox": "tk"}), {mode: 0o600});
+    await writeSessions({acme: {accessToken: "at", refreshToken: "rt"}});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (del.run as any)({args: {name: "acme", yes: true}, rawArgs: []});
     const cfg = await readConfig();
     expect(cfg.profiles).not.toHaveProperty("acme");
-    const secrets = await readSecrets();
-    expect(secrets["acme:sandbox"]).toBeUndefined();
+    const sessions = await readSessions();
+    expect(sessions.acme).toBeUndefined();
     stdout.mockRestore();
   });
 
-  it("scrubs orphaned secret slots even when config entry is absent", async () => {
+  it("scrubs an orphaned session even when config entry is absent", async () => {
     await writeConfig({schemaVersion: 1, profiles: {}});
-    await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-    await fs.writeFile(secretsFilePath(), JSON.stringify({"orphan:sandbox": "tk"}), {mode: 0o600});
+    await writeSessions({orphan: {accessToken: "at", refreshToken: "rt"}});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (del.run as any)({args: {name: "orphan"}, rawArgs: []});
-    const secrets = await readSecrets();
-    expect(secrets["orphan:sandbox"]).toBeUndefined();
+    const sessions = await readSessions();
+    expect(sessions.orphan).toBeUndefined();
     stdout.mockRestore();
   });
 });

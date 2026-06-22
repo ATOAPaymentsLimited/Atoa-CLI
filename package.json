@@ -9,13 +9,19 @@
   "bin": {
     "atoa": "./bin/atoa.js"
   },
-  "files": ["bin", "dist"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsup",
     "build:release": "tsup",
     "clean": "rimraf dist",
     "dev": "tsx src/cli.ts",
+    "dev:local": "cross-env ATOA_ALLOW_INSECURE=1 ATOA_BASE_URL=http://localhost:9090/server ATOA_DASHBOARD_URL=http://localhost:3000 tsx src/cli.ts",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
     "prettier": "prettier \"src/**/*.ts\" \"test/**/*.ts\" --write",
@@ -26,7 +32,6 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
-    "@napi-rs/keyring": "^1.1.4",
     "citty": "^0.2.2",
     "cli-table3": "^0.6.5",
     "js-yaml": "^4.1.0",

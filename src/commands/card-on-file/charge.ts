@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 
 type ChargeArgs = CommonOptions & {
@@ -38,7 +38,7 @@ export default defineCommand({
       description: "override the auto-generated Idempotency-Key (e.g. CI dedup keyed off $RUN_ID)"
     }
   }),
-  run: runWithContext<ChargeArgs>(async (ctx, args) => {
+  run: runWithSdkKey<ChargeArgs>(async (ctx, args) => {
     const captureType =
       args.captureType ??
       (args.capture === true ? "AUTO_CAPTURE" : args.capture === false ? "MANUAL_CAPTURE" : "AUTO_CAPTURE");

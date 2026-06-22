@@ -33,6 +33,23 @@ function colorizeJson(data: unknown): string {
   });
 }
 
+/** True when output should be human-rendered: a TTY with no explicit --output. */
+export function isInteractive(formatExplicit: boolean): boolean {
+  return Boolean(process.stdout.isTTY) && !formatExplicit;
+}
+
+/**
+ * Renders a heading followed by aligned "  Label  value" rows for a flat record.
+ * Rows with empty/undefined values are dropped, so callers can list every possible
+ * field and only the set ones show. Used by the CLI-authored summary commands
+ * (whoami, signup, …) for their human view; scripting still gets the raw object.
+ */
+export function renderKeyValues(heading: string, rows: Array<[string, string | undefined]>): string {
+  const present = rows.filter((r): r is [string, string] => Boolean(r[1]));
+  const pad = present.length ? Math.max(...present.map(([k]) => k.length)) : 0;
+  return [heading, "", ...present.map(([k, v]) => `  ${k.padEnd(pad)}  ${v}`)].join("\n");
+}
+
 export function resolveFormat(requested: string | undefined): OutputFormat {
   if (requested === "json" || requested === "table" || requested === "yaml") return requested;
   if (requested) throw new Error(`Invalid --output value '${requested}'. Use json|table|yaml.`);

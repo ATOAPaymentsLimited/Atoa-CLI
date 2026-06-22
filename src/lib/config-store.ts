@@ -1,6 +1,8 @@
 import {promises as fs} from "fs";
+import {hostname} from "os";
 import {join} from "path";
-import {configHomeDir} from "./secrets-store";
+import {randomUUID} from "crypto";
+import {configHomeDir, createSecretsStore} from "./secrets-store";
 
 export type Env = "sandbox" | "production";
 
@@ -8,6 +10,8 @@ export interface EnvState {
   tokenFingerprint: string;
   /** Opaque identifier for the SDK access key. Used by the revoke/regenerate endpoints. */
   sdkAccessId?: string;
+  /** Whether this profile+env uses JWT browser login or the legacy SDK paste flow. */
+  authMode?: "jwt" | "sdk-paste";
 }
 
 export interface ProfileConfig {
@@ -15,6 +19,8 @@ export interface ProfileConfig {
   displayName: string;
   defaultEnv?: Env;
   envs: Partial<Record<Env, EnvState>>;
+  /** The business ID that was last selected/active in the dashboard for this profile. */
+  activeBusinessId?: string;
 }
 
 export interface AtoaConfig {
@@ -22,6 +28,8 @@ export interface AtoaConfig {
   schemaVersion: 1;
   activeProfile?: string;
   profiles: Record<string, ProfileConfig>;
+  /** Stable per-machine identifier sent with every programmatic grant request. */
+  clientDeviceId?: string;
 }
 
 export const CURRENT_SCHEMA_VERSION = 1 as const;
@@ -65,7 +73,8 @@ export async function readConfig(): Promise<AtoaConfig> {
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     activeProfile: parsed.activeProfile,
-    profiles: normalizeProfiles(parsed.profiles ?? {})
+    profiles: normalizeProfiles(parsed.profiles ?? {}),
+    clientDeviceId: parsed.clientDeviceId
   };
 }
 
@@ -76,7 +85,8 @@ function normalizeProfiles(profiles: Record<string, Partial<ProfileConfig>>): Re
       businessId: raw.businessId ?? "",
       displayName: raw.displayName ?? name,
       defaultEnv: raw.defaultEnv,
-      envs: raw.envs ?? {}
+      envs: raw.envs ?? {},
+      activeBusinessId: raw.activeBusinessId
     };
   }
   return out;
@@ -280,4 +290,129 @@ export async function deriveProfileName(opts: {
     `Profile name collision: both "${base}" and "${candidate}" are taken by other businesses. ` +
       `Pass --profile <name> to choose explicitly.`
   );
+}
+
+// ---- Device identity ---------------------------------------------------------
+
+/**
+ * Returns the stable per-machine device UUID. Generates and persists a new
+ * random UUID on first call; subsequent calls return the same value.
+ *
+ * One UUID per config directory (not per profile) because backend sessions
+ * are keyed on the physical device, not on which business you're working with.
+ */
+export async function getOrCreateClientDeviceId(): Promise<string> {
+  const cfg = await readConfig();
+  if (cfg.clientDeviceId) return cfg.clientDeviceId;
+  const id = randomUUID();
+  cfg.clientDeviceId = id;
+  await writeConfig(cfg);
+  return id;
+}
+
+/**
+ * Returns `os.hostname()` truncated to 64 chars. Falls back to "atoa-cli"
+ * when the hostname is empty (e.g., containers with a blank /etc/hostname).
+ */
+export function getDeviceName(): string {
+  const name = hostname().slice(0, 64);
+  return name || "atoa-cli";
+}
+
+// ---- Per-profile activeBusinessId -------------------------------------------
+
+/**
+ * Returns the stored `activeBusinessId` for the given profile, or `undefined`
+ * if the profile doesn't exist or the field has not been set.
+ */
+export async function getActiveBusinessId(profileName: string): Promise<string | undefined> {
+  const cfg = await readConfig();
+  return cfg.profiles[profileName]?.activeBusinessId;
+}
+
+/**
+ * Persists `activeBusinessId` on the given profile. Throws if the profile
+ * doesn't exist so callers fail fast with a clear message.
+ */
+export async function setActiveBusinessId(profileName: string, businessId: string): Promise<void> {
+  const cfg = await readConfig();
+  if (!cfg.profiles[profileName]) {
+    throw new Error(`No profile named "${profileName}". Run \`atoa profile list\` to see available profiles.`);
+  }
+  cfg.profiles[profileName].activeBusinessId = businessId;
+  await writeConfig(cfg);
+}
+
+/**
+ * Renames a profile — used after signup to make the profile name match the new business slug.
+ * The profile name keys both the config entry AND the secret-store slots, so this moves the JWT
+ * secret to the new slot, carries the env session metadata over, points the entry at the new
+ * business, repoints `activeProfile`, and removes the old entry. Only JWT (browser-login) secrets
+ * are moved — that's all signup produces. If oldName === newName it just applies the updates.
+ */
+export async function renameProfile(
+  oldName: string,
+  newName: string,
+  updates: {businessId: string; displayName: string}
+): Promise<void> {
+  const cfg = await readConfig();
+  const existing = cfg.profiles[oldName];
+  if (!existing) throw new Error(`No profile named "${oldName}".`);
+
+  if (oldName === newName) {
+    cfg.profiles[oldName] = {
+      ...existing,
+      businessId: updates.businessId,
+      displayName: updates.displayName,
+      activeBusinessId: updates.businessId
+    };
+    await writeConfig(cfg);
+    return;
+  }
+  if (cfg.profiles[newName]) {
+    throw new Error(`Cannot rename to "${newName}" — a profile with that name already exists.`);
+  }
+
+  // Move the JWT session (env-independent, keyed by profile name) from old to new.
+  const store = await createSecretsStore();
+  const jwt = await store.getJwtTokens(oldName);
+  if (jwt) await store.setJwtTokens(newName, jwt);
+
+  cfg.profiles[newName] = {
+    ...existing,
+    businessId: updates.businessId,
+    displayName: updates.displayName,
+    activeBusinessId: updates.businessId
+  };
+  delete cfg.profiles[oldName];
+  if (cfg.activeProfile === oldName) cfg.activeProfile = newName;
+  await writeConfig(cfg);
+
+  // Clear the old session only after the config no longer points at it.
+  await store.clearJwtTokens(oldName);
+}
+
+// ---- Per-profile-per-env authMode -------------------------------------------
+
+/**
+ * Returns the `authMode` for the given profile + env. When the field is absent
+ * (legacy config), returns `"sdk-paste"` so existing callers are unaffected.
+ */
+export async function getAuthMode(profileName: string, env: Env): Promise<"jwt" | "sdk-paste"> {
+  const cfg = await readConfig();
+  return cfg.profiles[profileName]?.envs[env]?.authMode ?? "sdk-paste";
+}
+
+/**
+ * Persists `authMode` for the given profile + env. Throws if the profile
+ * doesn't exist.
+ */
+export async function setAuthMode(profileName: string, env: Env, mode: "jwt" | "sdk-paste"): Promise<void> {
+  const cfg = await readConfig();
+  if (!cfg.profiles[profileName]) {
+    throw new Error(`No profile named "${profileName}". Run \`atoa profile list\` to see available profiles.`);
+  }
+  const existing = cfg.profiles[profileName].envs[env] ?? {tokenFingerprint: ""};
+  cfg.profiles[profileName].envs[env] = {...existing, authMode: mode};
+  await writeConfig(cfg);
 }

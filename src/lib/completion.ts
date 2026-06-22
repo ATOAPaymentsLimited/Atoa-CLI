@@ -94,7 +94,7 @@ export async function suggest(rootCmd: CommandDef, rawLine: string): Promise<str
   // could resolve; anything after it is either the current incomplete word or
   // already-typed positional args.
   let cmd: CommandDef = rootCmd;
-  let pathParts: string[] = [];
+  const pathParts: string[] = [];
   let consumed = 0;
 
   for (let i = 0; i < words.length; i++) {

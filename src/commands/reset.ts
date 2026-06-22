@@ -2,7 +2,8 @@ import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
 import {unlink} from "fs/promises";
 import {configFilePath, readConfig, type EnvState} from "../lib/config-store";
-import {createSecretsStore, secretsFilePath, type SecretsStore} from "../lib/secrets-store";
+import {createSecretsStore, sessionFilePath, type SecretsStore} from "../lib/secrets-store";
+import {sdkKeyFilePath} from "../lib/sdk-key-file";
 import {buildHttpClient, assertTlsHardenedEnv} from "../lib/http";
 import {resolveBaseUrl} from "../lib/env";
 import {buildAuthHeader} from "../lib/auth";
@@ -54,7 +55,7 @@ export default defineCommand({
             {
               action: "reset",
               willClearProfiles: profileNames,
-              willWipeFiles: [configFilePath(), secretsFilePath()],
+              willWipeFiles: [configFilePath(), sessionFilePath(), sdkKeyFilePath()],
               willRevoke: args.revoke ? targets : []
             },
             null,
@@ -122,7 +123,7 @@ export default defineCommand({
 });
 
 async function wipeFiles(): Promise<void> {
-  for (const fp of [configFilePath(), secretsFilePath()]) {
+  for (const fp of [configFilePath(), sessionFilePath(), sdkKeyFilePath()]) {
     await unlink(fp).catch((err: NodeJS.ErrnoException) => {
       if (err.code !== "ENOENT") throw err;
     });

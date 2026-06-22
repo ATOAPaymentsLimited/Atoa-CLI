@@ -2,17 +2,15 @@ import {describe, it, expect, beforeEach, afterEach} from "vitest";
 import {promises as fs} from "fs";
 import {homedir, tmpdir} from "os";
 import {join} from "path";
-import {configHomeDir, secretsFilePath, createSecretsStore} from "../../src/lib/secrets-store";
+import {configHomeDir, authDir, sessionFilePath, createSecretsStore} from "../../src/lib/secrets-store";
 
 /**
- * Most tests run against the FILE backend by temporarily pointing `ATOA_HOME`
- * at a fresh tmpdir. The file backend is the security-critical fallback that
- * the reviewer specifically called out as undertested (round-4 finding W).
+ * The secrets store is FILE-ONLY (no OS keychain). Tests point `ATOA_HOME` at a
+ * fresh tmpdir; the session file lands at <ATOA_HOME>/atoa/auth/session.json.
  *
- * The keychain backend (`@napi-rs/keyring`) is platform-dependent — it relies
- * on Keychain (macOS) / Credential Manager (Windows) / libsecret (Linux). We
- * can't reliably exercise it in CI on every platform, so we cover the file
- * fallback (which is what runs in Docker / CI / headless Linux anyway).
+ * JWT sessions live in session.json under a `sessions` map keyed by
+ * `<profile>:<env>`. SDK get/set/delete are no-ops (SDK keys live elsewhere,
+ * in ~/atoa/auth/secret_key.json), so we assert the no-op behaviour here.
  */
 
 let scratchDir: string;
@@ -45,224 +43,233 @@ describe("configHomeDir", () => {
   });
 });
 
-describe("secretsFilePath", () => {
+describe("path helpers", () => {
   afterEach(() => {
     delete process.env.ATOA_HOME;
   });
 
-  it("composes <ATOA_HOME>/.config/atoa/secrets.json", () => {
+  it("authDir composes <ATOA_HOME>/.atoa/auth", () => {
     process.env.ATOA_HOME = "/tmp/atoa-test";
-    expect(secretsFilePath()).toBe(join("/tmp/atoa-test", ".config", "atoa", "secrets.json"));
+    expect(authDir()).toBe(join("/tmp/atoa-test", ".atoa", "auth"));
+  });
+
+  it("sessionFilePath composes <ATOA_HOME>/.atoa/auth/session.json", () => {
+    process.env.ATOA_HOME = "/tmp/atoa-test";
+    expect(sessionFilePath()).toBe(join("/tmp/atoa-test", ".atoa", "auth", "session.json"));
   });
 });
 
-describe("file backend — basic round-trip", () => {
+describe("backend", () => {
   beforeEach(withFileBackend);
   afterEach(cleanupFileBackend);
 
-  it("returns undefined for an unset slot", async () => {
+  it("always reports the file backend", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return; // skip when machine has a keychain
-    const got = await store.get("acme", "sandbox");
-    expect(got).toBeUndefined();
+    expect(store.backend()).toBe("file");
   });
+});
 
-  it("set then get round-trips the token", async () => {
+describe("SDK get/set/delete — no-ops", () => {
+  beforeEach(withFileBackend);
+  afterEach(cleanupFileBackend);
+
+  it("get returns undefined (SDK keys stored elsewhere)", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "tk_abc123");
-    expect(await store.get("acme", "sandbox")).toBe("tk_abc123");
-  });
-
-  it("isolates slots by profile + env (no cross-contamination)", async () => {
-    const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "sb-token");
-    await store.set("acme", "production", "prod-token");
-    await store.set("other-merchant", "sandbox", "other-sb");
-
-    expect(await store.get("acme", "sandbox")).toBe("sb-token");
-    expect(await store.get("acme", "production")).toBe("prod-token");
-    expect(await store.get("other-merchant", "sandbox")).toBe("other-sb");
-    expect(await store.get("other-merchant", "production")).toBeUndefined();
-  });
-
-  it("delete clears just the one slot, not the other env", async () => {
-    const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "sb");
-    await store.set("acme", "production", "prod");
-
-    await store.delete("acme", "sandbox");
     expect(await store.get("acme", "sandbox")).toBeUndefined();
-    expect(await store.get("acme", "production")).toBe("prod");
   });
 
-  it("deleteProfile clears both envs for a profile but spares other profiles", async () => {
+  it("set is a no-op and does not create a session file", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "a-sb");
-    await store.set("acme", "production", "a-prod");
-    await store.set("other", "sandbox", "o-sb");
+    await store.set("acme", "sandbox", "tk_abc123");
+    expect(await store.get("acme", "sandbox")).toBeUndefined();
+    await expect(fs.access(sessionFilePath())).rejects.toThrow();
+  });
+
+  it("delete is a no-op (does not throw)", async () => {
+    const store = await createSecretsStore();
+    await expect(store.delete("acme", "sandbox")).resolves.not.toThrow();
+  });
+});
+
+describe("JWT round-trip", () => {
+  beforeEach(withFileBackend);
+  afterEach(cleanupFileBackend);
+
+  it("returns null for an unset profile", async () => {
+    const store = await createSecretsStore();
+    expect(await store.getJwtTokens("acme")).toBeNull();
+  });
+
+  it("set then get round-trips the tokens", async () => {
+    const store = await createSecretsStore();
+    await store.setJwtTokens("acme", {accessToken: "at_1", refreshToken: "rt_1"});
+    expect(await store.getJwtTokens("acme")).toEqual({accessToken: "at_1", refreshToken: "rt_1"});
+  });
+
+  it("isolates sessions by profile (no cross-contamination)", async () => {
+    const store = await createSecretsStore();
+    await store.setJwtTokens("acme", {accessToken: "at_acme", refreshToken: "rt_acme"});
+    await store.setJwtTokens("other-merchant", {accessToken: "at_other", refreshToken: "rt_other"});
+
+    expect(await store.getJwtTokens("acme")).toEqual({accessToken: "at_acme", refreshToken: "rt_acme"});
+    expect(await store.getJwtTokens("other-merchant")).toEqual({accessToken: "at_other", refreshToken: "rt_other"});
+  });
+
+  it("setJwtTokens overwrites the profile's session (env-independent — no second slot)", async () => {
+    const store = await createSecretsStore();
+    await store.setJwtTokens("acme", {accessToken: "at_old", refreshToken: "rt_old"});
+    await store.setJwtTokens("acme", {accessToken: "at_new", refreshToken: "rt_new"});
+    expect(await store.getJwtTokens("acme")).toEqual({accessToken: "at_new", refreshToken: "rt_new"});
+  });
+
+  it("clearJwtTokens clears the profile session", async () => {
+    const store = await createSecretsStore();
+    await store.setJwtTokens("acme", {accessToken: "at_1", refreshToken: "rt_1"});
+
+    await store.clearJwtTokens("acme");
+    expect(await store.getJwtTokens("acme")).toBeNull();
+  });
+
+  it("deleteProfile clears a profile's session but spares other profiles", async () => {
+    const store = await createSecretsStore();
+    await store.setJwtTokens("acme", {accessToken: "a-1", refreshToken: "a-1-r"});
+    await store.setJwtTokens("other", {accessToken: "o-1", refreshToken: "o-1-r"});
 
     await store.deleteProfile("acme");
-    expect(await store.get("acme", "sandbox")).toBeUndefined();
-    expect(await store.get("acme", "production")).toBeUndefined();
-    expect(await store.get("other", "sandbox")).toBe("o-sb");
+    expect(await store.getJwtTokens("acme")).toBeNull();
+    expect(await store.getJwtTokens("other")).toEqual({accessToken: "o-1", refreshToken: "o-1-r"});
   });
 });
 
-describe("file backend — on-disk format", () => {
+describe("on-disk format", () => {
   beforeEach(withFileBackend);
   afterEach(cleanupFileBackend);
 
-  it("writes plain JSON at the secrets file path", async () => {
+  it("writes plain JSON at the session file path under a `sessions` map", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "tk_plain");
+    await store.setJwtTokens("acme", {accessToken: "at_plain", refreshToken: "rt_plain"});
 
-    const raw = await fs.readFile(secretsFilePath(), "utf8");
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    expect(parsed["acme:sandbox"]).toBe("tk_plain");
+    const raw = await fs.readFile(sessionFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as {sessions: Record<string, {accessToken: string; refreshToken: string}>};
+    expect(parsed.sessions["acme"]).toEqual({accessToken: "at_plain", refreshToken: "rt_plain"});
   });
 
-  it("does NOT create a separate .key file (encryption layer was removed)", async () => {
+  it("uses `<profile>` as the session key (env-independent)", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "tk");
+    await store.setJwtTokens("acme-uk", {accessToken: "at", refreshToken: "rt"});
 
-    const keyPath = join(scratchDir, ".config", "atoa", ".key");
-    await expect(fs.access(keyPath)).rejects.toThrow();
-  });
-
-  it("uses `<profile>:<env>` as the slot key (matches slotKey()'s contract)", async () => {
-    const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme-uk", "production", "tk");
-
-    const raw = await fs.readFile(secretsFilePath(), "utf8");
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    expect(Object.keys(parsed)).toContain("acme-uk:production");
+    const raw = await fs.readFile(sessionFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as {sessions: Record<string, unknown>};
+    expect(Object.keys(parsed.sessions)).toContain("acme-uk");
   });
 });
 
-describe("file backend — read-side guards", () => {
+describe("read-side guards", () => {
   beforeEach(withFileBackend);
   afterEach(cleanupFileBackend);
 
-  it("throws a clear error when secrets.json contains invalid JSON", async () => {
-    // Pre-create a corrupt file
-    const fp = secretsFilePath();
+  it("throws a clear error when session.json contains invalid JSON", async () => {
+    const fp = sessionFilePath();
     await fs.mkdir(join(fp, ".."), {recursive: true, mode: 0o700});
     await fs.writeFile(fp, "{ definitely not JSON", {mode: 0o600});
 
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-
-    await expect(store.get("acme", "sandbox")).rejects.toThrow(/Refusing to parse.*not valid JSON/);
+    await expect(store.getJwtTokens("acme")).rejects.toThrow(/Refusing to parse.*not valid JSON/);
   });
 
   it("includes the `atoa reset` recovery hint in the parse-error message", async () => {
-    const fp = secretsFilePath();
+    const fp = sessionFilePath();
     await fs.mkdir(join(fp, ".."), {recursive: true, mode: 0o700});
     await fs.writeFile(fp, "garbage", {mode: 0o600});
 
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-
-    await expect(store.get("acme", "sandbox")).rejects.toThrow(/atoa reset --yes/);
+    await expect(store.getJwtTokens("acme")).rejects.toThrow(/atoa reset --yes/);
   });
 
   it.runIf(process.platform !== "win32")("refuses to read when permissions are insecure (POSIX only)", async () => {
-    const fp = secretsFilePath();
+    const fp = sessionFilePath();
     await fs.mkdir(join(fp, ".."), {recursive: true, mode: 0o700});
-    await fs.writeFile(fp, JSON.stringify({"acme:sandbox": "tk"}), {mode: 0o644}); // group/other readable
+    await fs.writeFile(fp, JSON.stringify({sessions: {}}), {mode: 0o644}); // group/other readable
 
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-
-    await expect(store.get("acme", "sandbox")).rejects.toThrow(/insecure permissions/);
+    await expect(store.getJwtTokens("acme")).rejects.toThrow(/insecure permissions/);
   });
 
   it.runIf(process.platform !== "win32")("permission-refusal message includes the chmod fix command", async () => {
-    const fp = secretsFilePath();
+    const fp = sessionFilePath();
     await fs.mkdir(join(fp, ".."), {recursive: true, mode: 0o700});
     await fs.writeFile(fp, "{}", {mode: 0o644});
 
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-
-    await expect(store.get("acme", "sandbox")).rejects.toThrow(/chmod 600/);
+    await expect(store.getJwtTokens("acme")).rejects.toThrow(/chmod 600/);
   });
 });
 
-describe("file backend — atomic writes", () => {
+describe("atomic writes", () => {
   beforeEach(withFileBackend);
   afterEach(cleanupFileBackend);
 
   it("leaves no tmp file behind after a successful write", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "tk");
+    await store.setJwtTokens("acme", {accessToken: "at", refreshToken: "rt"});
 
-    const dir = join(scratchDir, ".config", "atoa");
+    const dir = authDir();
     const files = await fs.readdir(dir);
-    const tmpFiles = files.filter((f) => f.startsWith("secrets.json.tmp"));
+    const tmpFiles = files.filter((f) => f.startsWith("session.json.tmp"));
     expect(tmpFiles).toEqual([]);
   });
 
   it("creates the parent directory tree if it doesn't exist yet", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
     // fresh scratch — directory doesn't exist
-    await store.set("first-login", "sandbox", "tk");
+    await store.setJwtTokens("first-login", {accessToken: "at", refreshToken: "rt"});
 
-    const fp = secretsFilePath();
-    const stat = await fs.stat(fp);
+    const stat = await fs.stat(sessionFilePath());
     expect(stat.isFile()).toBe(true);
   });
 });
 
-describe("file backend — concurrent writes (lockfile)", () => {
+describe("concurrent writes (lockfile)", () => {
   beforeEach(withFileBackend);
   afterEach(cleanupFileBackend);
 
-  it("does not lose writes when N concurrent set() calls race on the same file", async () => {
+  it("does not lose writes when N concurrent setJwtTokens calls race on the same file", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
 
-    // Spawn 20 concurrent set()s, each adding a unique profile slot. Without
+    // Spawn 20 concurrent writes, each adding a unique profile slot. Without
     // the lockfile, the read-modify-write race drops at least one entry on any
     // machine fast enough to overlap the I/O. With the lock, all 20 land.
     const N = 20;
-    await Promise.all(Array.from({length: N}, (_, i) => store.set(`profile-${i}`, "sandbox", `tk-${i}`)));
+    await Promise.all(
+      Array.from({length: N}, (_, i) =>
+        store.setJwtTokens(`profile-${i}`, {accessToken: `at-${i}`, refreshToken: `rt-${i}`})
+      )
+    );
 
-    const surviving = await Promise.all(Array.from({length: N}, (_, i) => store.get(`profile-${i}`, "sandbox")));
+    const surviving = await Promise.all(Array.from({length: N}, (_, i) => store.getJwtTokens(`profile-${i}`)));
     for (let i = 0; i < N; i++) {
-      expect(surviving[i]).toBe(`tk-${i}`);
+      expect(surviving[i]).toEqual({accessToken: `at-${i}`, refreshToken: `rt-${i}`});
     }
   });
 
   it("removes the lockfile after a successful write", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
-    await store.set("acme", "sandbox", "tk");
+    await store.setJwtTokens("acme", {accessToken: "at", refreshToken: "rt"});
 
-    const lockPath = secretsFilePath() + ".lock";
+    const lockPath = sessionFilePath() + ".lock";
     await expect(fs.stat(lockPath)).rejects.toMatchObject({code: "ENOENT"});
   });
 
   it("releases the lockfile even when the wrapped write throws", async () => {
     const store = await createSecretsStore();
-    if (store.backend() !== "file") return;
 
-    // Corrupt the existing config to force a parse-error mid-update; the lock
-    // should still be released on the way out via the `finally` cleanup.
-    await store.set("seed", "sandbox", "tk");
-    const fp = secretsFilePath();
+    // Corrupt the existing session file to force a parse-error mid-update; the
+    // lock should still be released on the way out via the `finally` cleanup.
+    await store.setJwtTokens("seed", {accessToken: "at", refreshToken: "rt"});
+    const fp = sessionFilePath();
     await fs.writeFile(fp, "{ not valid json", "utf8");
 
-    await expect(store.set("acme", "sandbox", "tk")).rejects.toThrow();
+    await expect(store.setJwtTokens("acme", {accessToken: "at", refreshToken: "rt"})).rejects.toThrow();
 
     const lockPath = fp + ".lock";
     await expect(fs.stat(lockPath)).rejects.toMatchObject({code: "ENOENT"});

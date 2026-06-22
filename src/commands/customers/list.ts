@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {walkAllPages} from "../../lib/pagination";
 
 type ListArgs = CommonOptions & {
@@ -17,7 +17,7 @@ export default defineCommand({
     search: {type: "string", description: "name/email search filter"},
     pageAll: {type: "boolean", description: "auto-walk all pages"}
   }),
-  run: runWithContext<ListArgs>(async (ctx, args) => {
+  run: runWithSdkKey<ListArgs>(async (ctx, args) => {
     const baseQuery: Record<string, string> = {
       ...(args.search && {search: args.search})
     };

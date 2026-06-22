@@ -4,96 +4,94 @@ import {join} from "path";
 
 export type SecretsEnv = "sandbox" | "production";
 
+export interface JwtTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
 export interface SecretsStore {
   get(profile: string, env: SecretsEnv): Promise<string | undefined>;
   set(profile: string, env: SecretsEnv, token: string): Promise<void>;
   delete(profile: string, env: SecretsEnv): Promise<void>;
   deleteProfile(profile: string): Promise<void>;
   backend(): "system" | "file";
+  /**
+   * Store the JWT credential pair for a profile. JWT sessions are env-INDEPENDENT
+   * (the control-plane backend is the same for sandbox/production), so they're keyed
+   * by profile only — unlike SDK keys, which are per-env (see sdk-key-file.ts).
+   */
+  setJwtTokens(profile: string, tokens: JwtTokens): Promise<void>;
+  /** Retrieve the JWT credential pair. Returns null when either half is missing. */
+  getJwtTokens(profile: string): Promise<JwtTokens | null>;
+  /** Remove the JWT session for a profile. */
+  clearJwtTokens(profile: string): Promise<void>;
 }
-
-function slotKey(profile: string, env: SecretsEnv): string {
-  return `${profile}:${env}`;
-}
-
-const SERVICE = "atoa-cli";
 
 export function configHomeDir(): string {
   return process.env.ATOA_HOME ?? homedir();
 }
 
-export function secretsFilePath(): string {
-  return join(configHomeDir(), ".config", "atoa", "secrets.json");
+/** ~/.atoa/auth — the (hidden) directory holding all CLI credential files (session + SDK keys). */
+export function authDir(): string {
+  return join(configHomeDir(), ".atoa", "auth");
 }
 
-async function readSecretsFile(): Promise<Record<string, string>> {
-  const fp = secretsFilePath();
+/** JWT session store. Plain file (no OS keychain) so external agents can read it; 0600. */
+export function sessionFilePath(): string {
+  return join(authDir(), "session.json");
+}
+
+interface SessionFile {
+  sessions: Record<string, JwtTokens>;
+}
+
+async function readSessionFile(): Promise<SessionFile> {
+  const fp = sessionFilePath();
   let raw: string;
   try {
     const st = await fs.stat(fp);
     if (process.platform !== "win32" && st.mode & 0o077) {
       throw new Error(
-        `Refusing to read ${fp}: insecure permissions (mode ${(st.mode & 0o777).toString(8)}). ` +
-          `Run: chmod 600 "${fp}"`
+        `Refusing to read ${fp}: insecure permissions (mode ${(st.mode & 0o777).toString(8)}). Run: chmod 600 "${fp}"`
       );
     }
     raw = await fs.readFile(fp, "utf8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {sessions: {}};
     throw err;
   }
-
   try {
-    return JSON.parse(raw) as Record<string, string>;
+    const parsed = JSON.parse(raw) as Partial<SessionFile>;
+    return {sessions: parsed.sessions ?? {}};
   } catch {
     throw new Error(
-      `Refusing to parse ${fp}: not valid JSON. ` +
-        `If this file was written by an older CLI build, run ` +
-        `\`atoa reset --yes\` then \`atoa login\` to re-establish credentials.`
+      `Refusing to parse ${fp}: not valid JSON. Run \`atoa reset --yes\` then \`atoa login\` to re-establish credentials.`
     );
   }
 }
 
-async function writeSecretsFile(data: Record<string, string>): Promise<void> {
-  const fp = secretsFilePath();
-  const dir = join(fp, "..");
+async function writeSessionFile(data: SessionFile): Promise<void> {
+  const fp = sessionFilePath();
   const tmp = `${fp}.tmp.${process.pid}`;
-  await fs.mkdir(dir, {recursive: true, mode: 0o700});
-  await fs.writeFile(tmp, JSON.stringify(data), {mode: 0o600});
+  await fs.mkdir(authDir(), {recursive: true, mode: 0o700});
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + "\n", {mode: 0o600});
   await fs.rename(tmp, fp);
   if (process.platform !== "win32") await fs.chmod(fp, 0o600);
 }
 
-/**
- * Hand-rolled lockfile around the read-modify-write transaction.
- *
- * Two concurrent `atoa login`s on the same machine would otherwise race on the
- * secrets.json read-modify-write: both load the same baseline, each writes its
- * own added entry, the second write wins and the first entry is lost.
- *
- * `fs.open(..., "wx")` is the cross-platform mutex primitive — it's atomic on
- * POSIX and on NTFS, and fails with `EEXIST` when the file already exists.
- *
- * Pattern is well-trodden — same shape as `proper-lockfile` but without the
- * dependency. Held for the duration of the read+write; cleaned up in `finally`
- * so a crash mid-update doesn't strand the lock. Stale-lock detection is
- * intentionally NOT done — the lock window is milliseconds and the recovery
- * path (`rm ~/.config/atoa/secrets.json.lock`) is trivial to document.
- */
+// Lockfile around the read-modify-write so two concurrent `atoa login`s don't clobber each other.
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_WAIT_MS = 5000;
 
 function lockFilePath(): string {
-  return secretsFilePath() + ".lock";
+  return sessionFilePath() + ".lock";
 }
 
 async function acquireLock(): Promise<() => Promise<void>> {
   const lockPath = lockFilePath();
-  const dir = join(lockPath, "..");
-  await fs.mkdir(dir, {recursive: true, mode: 0o700});
-
+  await fs.mkdir(join(lockPath, ".."), {recursive: true, mode: 0o700});
   const started = Date.now();
-  while (true) {
+  for (;;) {
     try {
       const handle = await fs.open(lockPath, "wx", 0o600);
       await handle.writeFile(String(process.pid));
@@ -110,7 +108,7 @@ async function acquireLock(): Promise<() => Promise<void>> {
       if (Date.now() - started > LOCK_MAX_WAIT_MS) {
         throw new Error(
           `Timed out acquiring lock on ${lockPath} after ${LOCK_MAX_WAIT_MS}ms. ` +
-            `If no other atoa process is running, remove the lockfile manually: rm "${lockPath}"`
+            `If no other atoa process is running, remove it manually: rm "${lockPath}"`
         );
       }
       await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
@@ -127,72 +125,52 @@ async function withLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * File-only credential store (no OS keychain — mirrors how gh/other CLIs keep tokens in a file).
+ * JWT sessions live in ~/.atoa/auth/session.json; SDK keys live in ~/.atoa/auth/secret_key.json
+ * (see sdk-key-file.ts). The SDK get/set/delete methods below remain for interface compatibility
+ * but are unused now that SDK keys are managed in their own file.
+ */
 const fileStore: SecretsStore = {
   backend: () => "file",
-  // Reads don't take the lock — concurrent readers can't corrupt anything, and
-  // a read overlapping a write either sees the pre-rename file (whole, stale by
-  // microseconds) or the post-rename file (whole, fresh). Atomic rename is the
-  // existing guarantee that makes this safe.
-  async get(profile, env) {
-    const data = await readSecretsFile();
-    return data[slotKey(profile, env)] || undefined;
+  async get() {
+    return undefined;
   },
-  async set(profile, env, token) {
-    await withLock(async () => {
-      const data = await readSecretsFile();
-      data[slotKey(profile, env)] = token;
-      await writeSecretsFile(data);
-    });
+  async set() {
+    /* SDK secrets are stored via sdk-key-file.ts, not here */
   },
-  async delete(profile, env) {
-    await withLock(async () => {
-      const data = await readSecretsFile();
-      delete data[slotKey(profile, env)];
-      await writeSecretsFile(data);
-    });
+  async delete() {
+    /* no-op */
   },
   async deleteProfile(profile) {
     await withLock(async () => {
-      const data = await readSecretsFile();
-      delete data[slotKey(profile, "sandbox")];
-      delete data[slotKey(profile, "production")];
-      await writeSecretsFile(data);
+      const data = await readSessionFile();
+      delete data.sessions[profile];
+      await writeSessionFile(data);
+    });
+  },
+  async setJwtTokens(profile, tokens) {
+    await withLock(async () => {
+      const data = await readSessionFile();
+      data.sessions[profile] = {accessToken: tokens.accessToken, refreshToken: tokens.refreshToken};
+      await writeSessionFile(data);
+    });
+  },
+  async getJwtTokens(profile) {
+    const data = await readSessionFile();
+    const session = data.sessions[profile];
+    if (!session?.accessToken || !session?.refreshToken) return null;
+    return {accessToken: session.accessToken, refreshToken: session.refreshToken};
+  },
+  async clearJwtTokens(profile) {
+    await withLock(async () => {
+      const data = await readSessionFile();
+      delete data.sessions[profile];
+      await writeSessionFile(data);
     });
   }
 };
 
 export async function createSecretsStore(): Promise<SecretsStore> {
-  try {
-    const {Entry} = await import("@napi-rs/keyring");
-    // Probe to verify keychain is accessible on this platform.
-    new Entry(SERVICE, "__probe__").getPassword();
-    return {
-      backend: () => "system",
-      async get(profile, env) {
-        const val = new Entry(SERVICE, slotKey(profile, env)).getPassword();
-        return val ?? undefined;
-      },
-      async set(profile, env, token) {
-        new Entry(SERVICE, slotKey(profile, env)).setPassword(token);
-      },
-      async delete(profile, env) {
-        try {
-          new Entry(SERVICE, slotKey(profile, env)).deletePassword();
-        } catch {
-          // not found — nothing to delete
-        }
-      },
-      async deleteProfile(profile) {
-        for (const env of ["sandbox", "production"] as SecretsEnv[]) {
-          try {
-            new Entry(SERVICE, slotKey(profile, env)).deletePassword();
-          } catch {
-            // not found — skip
-          }
-        }
-      }
-    };
-  } catch {
-    return fileStore;
-  }
+  return fileStore;
 }

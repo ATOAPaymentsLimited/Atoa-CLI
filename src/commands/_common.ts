@@ -1,5 +1,5 @@
 import type {ArgsDef, CommandContext as CittyContext} from "citty";
-import {buildContext, type CommandContext, type CommonOptions} from "../lib/context";
+import {buildContext, buildSdkContext, type CommandContext, type CommonOptions} from "../lib/context";
 
 export type {CommonOptions};
 import {exitCodeFor, printError, type AtoaError} from "../lib/errors";
@@ -45,7 +45,25 @@ export function runWithContext<Args extends CommonOptions>(handler: Handler<Args
       const ourCtx: CommandContext = await buildContext(args);
       await handler(ourCtx, args, rawArgs);
     } catch (err) {
-      printError(err);
+      printError(err, {authMode: "jwt"});
+      process.exitCode = exitCodeFor((err as AtoaError).kind);
+    }
+  };
+}
+
+/**
+ * Like runWithContext, but for the SDK-key commands: builds an SDK-authenticated context
+ * (no JWT login required) and runs the guard that prompts for + stores an API key in
+ * ~/atoa/auth/secret_key.json when none exists.
+ */
+export function runWithSdkKey<Args extends CommonOptions>(handler: Handler<Args>) {
+  return async ({args: ctxArgs, rawArgs = []}: CittyContext<ArgsDef>): Promise<void> => {
+    const args = ctxArgs as unknown as Args;
+    try {
+      const ourCtx: CommandContext = await buildSdkContext(args);
+      await handler(ourCtx, args, rawArgs);
+    } catch (err) {
+      printError(err, {authMode: "sdk"});
       process.exitCode = exitCodeFor((err as AtoaError).kind);
     }
   };

@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type BalanceArgs = CommonOptions & {id?: string};
 
@@ -8,7 +8,7 @@ export default defineCommand({
   args: withCommonArgs({
     id: {type: "positional", required: true, description: "accountId"}
   }),
-  run: runWithContext<BalanceArgs>(async (ctx, args) => {
+  run: runWithSdkKey<BalanceArgs>(async (ctx, args) => {
     const path = `/api/bank/accounts/${encodeURIComponent(args.id as string)}/balance`;
 
     if (ctx.dryRun) {
