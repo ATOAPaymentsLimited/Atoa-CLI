@@ -81,6 +81,10 @@ function hintFor(err: AtoaError, authMode: "jwt" | "sdk"): string | undefined {
 }
 
 export function printError(err: unknown, opts?: {authMode?: "jwt" | "sdk"}): void {
+  // Ctrl-C at an interactive prompt: @inquirer throws ExitPromptError. That's a
+  // user abort, not a failure — exit quietly without the scary SIGINT message.
+  if (err instanceof Error && err.name === "ExitPromptError") return;
+
   if (err instanceof AtoaError) {
     if (err.kind === "network") {
       process.stderr.write(`error: ${err.message}\n`);

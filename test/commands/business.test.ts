@@ -44,7 +44,7 @@ const mock = vi.hoisted(() => {
       activeBusinessId = "biz_1";
       setActiveCalledWith = undefined;
     },
-    buildContext: async (opts: any) => ({
+    buildContext: async (_opts: any) => ({
       env: "sandbox",
       http: {
         baseUrl: "https://api.atoa.me",

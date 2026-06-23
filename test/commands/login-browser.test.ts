@@ -153,9 +153,7 @@ function queueSingleBusinessLogin(): void {
     },
     {
       data: {
-        business: [
-          {business: {id: "biz_1", status: "ACTIVE", businessInfo: {legalBusinessName: "Acme Coffee"}}}
-        ]
+        business: [{business: {id: "biz_1", status: "ACTIVE", businessInfo: {legalBusinessName: "Acme Coffee"}}}]
       }
     }
   ];

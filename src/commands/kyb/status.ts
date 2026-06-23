@@ -1,6 +1,7 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
+import {isInteractive, renderKeyValues} from "../../lib/output";
 
 /**
  * The backend `GET /api/merchant/:businessId/getKybStatus` returns an ad-hoc
@@ -27,14 +28,25 @@ export default defineCommand({
     }
     const {data} = await ctx.http.request({...V1_ROUTES.kyb.status});
     const kyb = (data ?? {}) as KybStatus;
+    const approved = kyb.status === "APPROVED";
 
-    // Surface the headline status plus any rejection detail the backend included.
-    const out: Record<string, unknown> = {status: kyb.status};
-    if (kyb.rejectRemarks !== undefined) out["rejectRemarks"] = kyb.rejectRemarks;
-    if (kyb.declinedCodes !== undefined) out["declinedCodes"] = kyb.declinedCodes;
-    if (kyb.updatedAt !== undefined) out["updatedAt"] = kyb.updatedAt;
-    if (kyb.date !== undefined && kyb.date !== null) out["date"] = kyb.date;
+    // Approved → just the status. Otherwise the merchant only cares why it was
+    // rejected, so surface the reject remarks alone.
+    const out = approved ? {status: kyb.status} : {rejectRemarks: kyb.rejectRemarks};
 
-    ctx.print(out);
+    // Scripting (piped, or explicit --output) keeps the machine-readable object;
+    // an interactive terminal gets a labelled summary instead of raw JSON.
+    if (!isInteractive(ctx.formatExplicit)) {
+      ctx.print(out);
+      return;
+    }
+
+    const rows: Array<[string, string | undefined]> = approved
+      ? [["Status", kyb.status]]
+      : [
+          ["Status", kyb.status],
+          ["Reason", kyb.rejectRemarks]
+        ];
+    process.stdout.write(renderKeyValues("KYB verification", rows) + "\n");
   })
 });

@@ -44,10 +44,7 @@ export default defineCommand({
     // Backend (CreateUpdateBusinessUserModel) requires at least one of email or a
     // full phone (country code + number); a bare number is rejected. Fail fast.
     if (!email && !(phoneCountryCode && phoneNumber)) {
-      throw new AtoaError(
-        "provide --email, or both --phone-country-code and --phone",
-        "validation"
-      );
+      throw new AtoaError("provide --email, or both --phone-country-code and --phone", "validation");
     }
 
     const body: Record<string, unknown> = {firstName, lastName, roleId};

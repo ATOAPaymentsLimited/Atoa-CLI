@@ -17,9 +17,7 @@ export default defineCommand({
     await presentList(ctx, rows, {
       title: "Stores",
       line: (s) =>
-        [s["locationName"] || "(unnamed)", s["addressPostalCode"], s["cityOrTown"]]
-          .filter(Boolean)
-          .join("  ·  ")
+        [s["locationName"] || "(unnamed)", s["addressPostalCode"], s["cityOrTown"]].filter(Boolean).join("  ·  ")
     });
   })
 });

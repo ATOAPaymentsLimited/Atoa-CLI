@@ -1,6 +1,6 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, type CommonOptions} from "../_common";
-import {buildContext, type CommandContext} from "../../lib/context";
+import {buildSdkContext, type CommandContext} from "../../lib/context";
 import {AtoaError, exitCodeFor, printError} from "../../lib/errors";
 
 type TriggerArgs = CommonOptions & {
@@ -69,20 +69,9 @@ export default defineCommand({
       }
 
       // Force sandbox regardless of the active profile's default env or any
-      // --env flag. We do NOT call runWithContext here because that respects
+      // --env flag. We do NOT call runWithSdkKey here because that respects
       // the user's env preference; this command intentionally overrides it.
-      try {
-        ctx = await buildContext({...args, env: "sandbox"});
-      } catch (err) {
-        const ae = err as AtoaError;
-        if (ae.kind === "auth" && /No credentials/i.test(ae.message)) {
-          throw new AtoaError(
-            `no sandbox key stored for the active profile. \`atoa webhooks trigger\` always uses the sandbox key — \`atoa login\` (paste).`,
-            "auth"
-          );
-        }
-        throw err;
-      }
+      ctx = await buildSdkContext({...args, env: "sandbox"});
 
       let paymentMethod: string | undefined;
       if (args.paymentMethod) {
@@ -147,7 +136,7 @@ export default defineCommand({
         return;
       }
 
-      const {data} = await ctx.http.request({method: "POST", path, body});
+      const {data} = await ctx.http.request({method: "POST", path, body, auth: "sdk"});
 
       const msg = (data as {message?: unknown} | null)?.message;
       if (typeof msg === "string") {

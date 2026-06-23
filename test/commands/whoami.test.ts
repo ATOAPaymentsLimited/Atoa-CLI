@@ -1,14 +1,5 @@
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
-type Identity = {
-  id?: string;
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-  phoneCountryCode?: string;
-  phoneNumber?: string;
-};
-
 const mock = vi.hoisted(() => {
   let nextIdentity: any = {
     id: "user_1",

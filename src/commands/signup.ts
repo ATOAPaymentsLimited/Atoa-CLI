@@ -261,17 +261,26 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs, signupEmail?
         {name: "Charity", value: "CHARITY"}
       ]
     });
+    // CRNs (e.g. SC123123) and charity numbers are conventionally uppercase; transformer
+    // capitalises the live echo, toUpperCase guarantees the stored value (transformer is display-only).
     const crn = (
       await input({
-        message: companyType === "CHARITY" ? "Charity number:" : "Company registration number (CRN):"
+        message: companyType === "CHARITY" ? "Charity number:" : "Company registration number (CRN):",
+        transformer: (v) => v.toUpperCase()
       })
-    ).trim();
+    )
+      .trim()
+      .toUpperCase();
 
     const tradingName = await input({message: "Trading name (press Enter to use legal name):"});
     const addressLine1 = await input({message: "Address line 1:"});
     const addressLine2 = await input({message: "Address line 2 (optional):"});
     const cityOrTown = await input({message: "City / town:"});
-    const addressPostalCode = await input({message: "Postal code:"});
+    // Postcodes are conventionally uppercase; transformer capitalises the live echo,
+    // toUpperCase guarantees the stored value (transformer is display-only).
+    const addressPostalCode = (
+      await input({message: "Postal code:", transformer: (v) => v.toUpperCase()})
+    ).toUpperCase();
 
     const step2Body: Record<string, unknown> = {
       legalBusinessName,

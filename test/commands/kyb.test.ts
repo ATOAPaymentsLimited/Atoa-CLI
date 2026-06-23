@@ -22,7 +22,7 @@ const mock = vi.hoisted(() => {
         request: async (req: any) => {
           requests.push({method: req.method, path: req.path, auth: req.auth, body: req.body});
           if (req.path === "/api/merchant/:businessId/getKybStatus") {
-            return {status: 200, data: {status: "PENDING", manualReviewRequired: false}, requestId: "r"};
+            return {status: 200, data: {status: "APPROVED"}, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
         }
@@ -89,10 +89,11 @@ describe("kyb status", () => {
     expect(mock.requests[0].auth).toBe("jwt");
   });
 
-  it("prints the status response", async () => {
+  it("prints only the status when APPROVED", async () => {
     await (kybStatus.run as any)({args: {}, rawArgs: []});
     const data = mock.getPrinted() as any;
-    expect(data).toMatchObject({status: "PENDING"});
+    // Approved → headline status only (no rejectRemarks / declinedCodes noise).
+    expect(data).toEqual({status: "APPROVED"});
   });
 
   it("--dryRun does not send a request", async () => {
@@ -104,8 +105,9 @@ describe("kyb status", () => {
 
 describe("kyb link", () => {
   // The KYB deep-link is built CLI-side now (no backend endpoint): dashboard
-  // origin + /kyb?businessId=<active business id>.
-  const EXPECTED_URL = `${DASHBOARD}/kyb?businessId=biz_1`;
+  // origin + /verification?merchantId=<active business id> (the dashboard's
+  // verification page reads the business id from the merchantId query param).
+  const EXPECTED_URL = `${DASHBOARD}/verification?merchantId=biz_1`;
 
   it("builds the dashboard URL CLI-side without any HTTP request", async () => {
     await (kybLink.run as any)({args: {}, rawArgs: []});

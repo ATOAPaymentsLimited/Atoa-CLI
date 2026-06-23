@@ -47,6 +47,15 @@
       "rules": {
         "no-restricted-imports": "off"
       }
+    },
+    {
+      "files": ["test/**/*.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "complexity": "off",
+        "max-lines-per-function": "off",
+        "max-lines": "off"
+      }
     }
   ],
   "ignorePatterns": ["dist", "node_modules", "coverage"]

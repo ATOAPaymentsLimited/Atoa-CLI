@@ -10,16 +10,17 @@ type LinkArgs = CommonOptions & {open?: boolean};
 /**
  * Builds the KYB dashboard deep-link CLI-side.
  *
- * There is no backend endpoint for this — the old `/v1` controller just
- * concatenated the dashboard origin and the business id, so we do the same
- * here against `resolveDashboardUrl()` (runtime `ATOA_DASHBOARD_URL` →
- * compile-time define → default). The active business id comes from the
- * profile's stored `activeBusinessId` (same source `http.ts` uses to fill
- * `:businessId`).
+ * There is no backend endpoint for this — we concatenate the dashboard origin
+ * (`resolveDashboardUrl()`: runtime `ATOA_DASHBOARD_URL` → compile-time define
+ * → default) with the dashboard's KYB verification route. The `/verification`
+ * page and its `KybVerification` component (components/kyb/KybVerification.vue)
+ * read the business id from the `merchantId` query param. The active business
+ * id comes from the profile's stored `activeBusinessId` (same source `http.ts`
+ * uses to fill `:businessId`).
  */
 function buildKybUrl(businessId: string): string {
-  const url = new URL("/kyb", resolveDashboardUrl());
-  url.searchParams.set("businessId", businessId);
+  const url = new URL("/verification", resolveDashboardUrl());
+  url.searchParams.set("merchantId", businessId);
   return url.toString();
 }
 

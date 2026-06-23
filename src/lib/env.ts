@@ -4,8 +4,8 @@ declare const DASHBOARD_URL: string | undefined;
 
 export type Env = "sandbox" | "production";
 
-export const PUBLIC_BASE_URL = "https://localhost:9090/server";
-export const PUBLIC_DASHBOARD_URL = "http://localhost:3000";
+export const PUBLIC_BASE_URL = "https://api.atoa.me";
+export const PUBLIC_DASHBOARD_URL = "https://dashboard.paywithatoa.co.uk";
 
 export function parseEnvFlag(raw: string | undefined): Env {
   if (!raw || raw === "sandbox") return "sandbox";
