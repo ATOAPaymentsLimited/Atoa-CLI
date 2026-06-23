@@ -6,10 +6,11 @@ const dashboardUrl = process.env.ATOA_DASHBOARD_URL?.trim() || PUBLIC_DASHBOARD_
 
 export default defineConfig({
   entry: {cli: "src/cli.ts", index: "src/index.ts", bootstrap: "src/lib/bootstrap.ts"},
-  format: ["esm"],
+  format: ["cjs"],
   target: "node20",
   clean: true,
   sourcemap: true,
+  noExternal: ["citty", /^@inquirer\//],
   define: {
     BASE_URL: JSON.stringify(baseUrl),
     DASHBOARD_URL: JSON.stringify(dashboardUrl)

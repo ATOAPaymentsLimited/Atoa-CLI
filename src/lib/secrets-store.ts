@@ -172,5 +172,6 @@ const fileStore: SecretsStore = {
 };
 
 export async function createSecretsStore(): Promise<SecretsStore> {
+  // File-only by design: SDK secrets live in the auth file, never the OS keychain.
   return fileStore;
 }

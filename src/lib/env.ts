@@ -34,9 +34,5 @@ export function assertSecureBaseUrl(): void {
   const baseUrl = resolveBaseUrl();
   if (baseUrl.startsWith("https://")) return;
 
-  // ponytail: dev escape hatch — plaintext http allowed only for localhost AND
-  // only with an explicit opt-in. Remote http stays banned. Drop the env var to re-harden.
-  if (process.env.ATOA_ALLOW_INSECURE === "1" && /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(baseUrl)) return;
-
   throw new Error(`Refusing to start: BASE_URL="${baseUrl}" must be https://. Rebuild with an https:// BASE_URL.`);
 }

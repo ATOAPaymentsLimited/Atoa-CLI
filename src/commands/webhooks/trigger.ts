@@ -41,7 +41,7 @@ export default defineCommand({
     type: {
       type: "string",
       description:
-        "POS_PAYMENT_STATUS only — select which body shape to dispatch (payment / refund / expired). Rejected for non-POS events."
+        "POS_PAYMENT_STATUS only — body shape selector. One of: PAYMENTS_STATUS (default, payment-shaped body) | REFUND_STATUS | EXPIRED_STATUS. Rejected for non-POS events."
     },
     customFields: {
       type: "string",

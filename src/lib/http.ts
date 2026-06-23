@@ -170,7 +170,7 @@ export function buildHttpClient(opts: {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30_000);
       try {
-        response = await undiciFetch(url.toString(), {
+        response = await (undiciFetch as typeof undiciFetch)(url.toString(), {
           method: reqOpts.method,
           headers,
           body: reqOpts.rawBody ?? (reqOpts.body !== undefined ? JSON.stringify(reqOpts.body) : undefined),

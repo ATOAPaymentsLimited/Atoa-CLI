@@ -1,0 +1,28 @@
+# Pre-flight check for release branches.
+# Runs the full prepublish gate (lint + test + build) and a `npm publish --dry-run`
+# so packaging problems (missing dist, bloated tarball, bad metadata) are caught
+# on the release branch BEFORE it merges to main and triggers a real publish.
+
+name: release check
+
+on:
+  push:
+    branches: ["release/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      # --dry-run does NOT trigger prepublishOnly, and dist/ is gitignored,
+      # so run the same gate the real publish uses to build dist/ and lint+test.
+      - run: npm run prepublishOnly
+      - run: npm publish --dry-run
