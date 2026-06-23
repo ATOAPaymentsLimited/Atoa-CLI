@@ -59,39 +59,47 @@ import rename from "../../src/commands/profile/rename";
 import del from "../../src/commands/profile/delete";
 
 describe("profile list", () => {
-  it("reports 'no profiles configured' when none exist", async () => {
+  it("reports 'no signed-in profiles' when none exist", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (list.run as any)({args: {}, rawArgs: []});
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/no profiles configured/);
+    expect(out).toMatch(/no signed-in profiles/);
     stdout.mockRestore();
   });
 
-  it("renders a table including the active profile marker", async () => {
+  it("renders a list with the active profile marked and no env columns", async () => {
+    await writeConfig({
+      schemaVersion: 1,
+      activeProfile: "acme",
+      profiles: {acme: {businessId: "biz_1", displayName: "Acme Ltd", envs: {}}}
+    });
+    await writeSessions({acme: {accessToken: "a", refreshToken: "r"}});
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await (list.run as any)({args: {}, rawArgs: []});
+    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
+    expect(out).toMatch(/Profiles/);
+    expect(out).toMatch(/\*\s+acme/); // active marker
+    expect(out).toMatch(/Acme Ltd/);
+    // env columns dropped
+    expect(out).not.toMatch(/SANDBOX|PRODUCTION|DEFAULT_ENV/);
+    stdout.mockRestore();
+  });
+
+  it("omits profiles without a JWT session (they'd need re-login)", async () => {
     await writeConfig({
       schemaVersion: 1,
       activeProfile: "acme",
       profiles: {
-        acme: {
-          businessId: "biz_1",
-          displayName: "Acme Ltd",
-          defaultEnv: "sandbox",
-          envs: {sandbox: {tokenFingerprint: "RlM="}}
-        }
+        acme: {businessId: "biz_1", displayName: "Acme Ltd", envs: {}},
+        stale: {businessId: "biz_2", displayName: "Stale Co", envs: {}}
       }
     });
+    await writeSessions({acme: {accessToken: "a", refreshToken: "r"}}); // only acme is signed in
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (list.run as any)({args: {}, rawArgs: []});
-    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/NAME/);
-    expect(out).toMatch(/BUSINESS/);
-    expect(out).toMatch(/SANDBOX/);
-    expect(out).toMatch(/acme/);
-    expect(out).toMatch(/Acme Ltd/);
-    expect(out).toMatch(/sandbox/);
-    expect(out).toMatch(/…RlM=/);
-    // No businessId column (was removed in §6.6 / round-4 cleanup)
-    expect(out).not.toMatch(/BUSINESS_ID/);
+    await (list.run as any)({args: {output: "json"}, rawArgs: []});
+    const parsed = JSON.parse(stdout.mock.calls.map((c) => String(c[0])).join(""));
+    expect(parsed.profiles).toHaveLength(1);
+    expect(parsed.profiles[0].name).toBe("acme");
     stdout.mockRestore();
   });
 
@@ -101,6 +109,7 @@ describe("profile list", () => {
       activeProfile: "acme",
       profiles: {acme: {businessId: "biz_1", displayName: "Acme", envs: {}}}
     });
+    await writeSessions({acme: {accessToken: "a", refreshToken: "r"}});
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (list.run as any)({args: {output: "json"}, rawArgs: []});
     const raw = stdout.mock.calls.map((c) => String(c[0])).join("");
@@ -108,6 +117,9 @@ describe("profile list", () => {
     expect(parsed.profiles).toHaveLength(1);
     expect(parsed.profiles[0].name).toBe("acme");
     expect(parsed.profiles[0].active).toBe(true);
+    expect(parsed.profiles[0].business).toBe("Acme");
+    // env fields dropped from JSON too
+    expect(parsed.profiles[0]).not.toHaveProperty("defaultEnv");
     stdout.mockRestore();
   });
 });

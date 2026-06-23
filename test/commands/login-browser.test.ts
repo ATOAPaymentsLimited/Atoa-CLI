@@ -33,7 +33,6 @@ vi.mock("../../src/lib/config-store", async () => {
       const profiles = state.config.profiles as Record<string, unknown> | undefined;
       return profiles?.[name];
     }),
-    getOrCreateClientDeviceId: vi.fn(async () => "device-uuid-1"),
     getDeviceName: vi.fn(() => "test-host"),
     setActiveBusinessId: vi.fn(async (profile: string, businessId: string) => {
       state.activeBusinessCalls.push({profile, businessId});
@@ -206,7 +205,8 @@ describe("login (browser PKCE flow)", () => {
     expect(url.searchParams.get("code_challenge")).toBe("test-challenge");
     expect(url.searchParams.get("state")).toBe("test-state");
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:43210/callback");
-    expect(url.searchParams.get("client_device_id")).toBe("device-uuid-1");
+    // Bare login mints a fresh per-profile device id (UUID), not a shared machine-level one.
+    expect(url.searchParams.get("client_device_id")).toMatch(/^[0-9a-f-]{36}$/i);
     expect(url.searchParams.get("device_name")).toBe("test-host");
 
     // Loopback server got the expected state before the browser opened.
@@ -226,12 +226,17 @@ describe("login (browser PKCE flow)", () => {
 
     // Tokens stored under the derived profile (env-independent key); profile persisted with authMode jwt.
     expect(state.jwt["acme-coffee"]).toEqual({accessToken: "at-1", refreshToken: "rt-1"});
-    const profile = (state.config.profiles as Record<string, {businessId: string; envs: Record<string, unknown>}>)[
-      "acme-coffee"
-    ];
+    const profile = (
+      state.config.profiles as Record<
+        string,
+        {businessId: string; envs: Record<string, unknown>; clientDeviceId?: string}
+      >
+    )["acme-coffee"];
     expect(profile.businessId).toBe("biz_1");
     expect(profile.envs.sandbox).toMatchObject({authMode: "jwt"});
     expect(state.config.activeProfile).toBe("acme-coffee");
+    // The minted device id is persisted on the profile and matches the one sent in the grant.
+    expect(profile.clientDeviceId).toBe(url.searchParams.get("client_device_id"));
 
     expect(stderr()).toMatch(/if it doesn't open, visit/i);
     expect(stdout()).toMatch(/logged in to sandbox as profile "acme-coffee"/);

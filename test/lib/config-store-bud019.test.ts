@@ -1,7 +1,6 @@
 /**
  * BUD-019 Phase 6 — Task 1
  * Tests for new config-store additions:
- *   - getOrCreateClientDeviceId()
  *   - getDeviceName()
  *   - activeBusinessId get/set helpers
  *   - authMode field (default "sdk-paste")
@@ -16,7 +15,6 @@ import {
   writeConfig,
   configFilePath,
   newProfile,
-  getOrCreateClientDeviceId,
   getDeviceName,
   getActiveBusinessId,
   setActiveBusinessId,
@@ -43,34 +41,6 @@ function makeProfile(overrides: Partial<ProfileConfig> = {}): ProfileConfig {
   const base = newProfile({businessId: "biz_1", displayName: "Test Co"});
   return {...base, ...overrides};
 }
-
-// ---- getOrCreateClientDeviceId -----------------------------------------------
-
-describe("getOrCreateClientDeviceId", () => {
-  it("generates a UUID (RFC 4122 format) on first call", async () => {
-    const id = await getOrCreateClientDeviceId();
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-  });
-
-  it("returns the same value on subsequent calls (stable)", async () => {
-    const first = await getOrCreateClientDeviceId();
-    const second = await getOrCreateClientDeviceId();
-    expect(second).toBe(first);
-  });
-
-  it("persists the device id in config.json", async () => {
-    const id = await getOrCreateClientDeviceId();
-    const cfg = await readConfig();
-    expect(cfg.clientDeviceId).toBe(id);
-  });
-
-  it("does not overwrite an existing clientDeviceId", async () => {
-    // Manually write a config with a pre-existing device id
-    await writeConfig({schemaVersion: 1, profiles: {}, clientDeviceId: "fixed-uuid-1234"});
-    const id = await getOrCreateClientDeviceId();
-    expect(id).toBe("fixed-uuid-1234");
-  });
-});
 
 // ---- getDeviceName -----------------------------------------------------------
 
@@ -177,7 +147,7 @@ describe("legacy config compatibility", () => {
 
     const cfg = await readConfig();
     expect(cfg.profiles.acme.businessId).toBe("biz_legacy");
-    // New fields should simply be absent / undefined — no crash
-    expect(cfg.clientDeviceId).toBeUndefined();
+    // New per-profile fields should simply be absent / undefined — no crash
+    expect(cfg.profiles.acme.clientDeviceId).toBeUndefined();
   });
 });

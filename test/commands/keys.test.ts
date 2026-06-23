@@ -120,7 +120,6 @@ describe("keys revoke", () => {
     const out = mock.printed[0] as any;
     expect(out.revoked).toBe(true);
     expect(out.sdkAccessId).toBe("sda_sb");
-    expect(out.removedFrom).toBe(sdkKeyFilePath());
   });
 
   it("explicit positional id overrides the file lookup", async () => {

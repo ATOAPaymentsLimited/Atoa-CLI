@@ -1,5 +1,6 @@
 import {defineCommand} from "citty";
-import {select} from "@inquirer/prompts";
+import {randomUUID} from "node:crypto";
+import {select, confirm} from "@inquirer/prompts";
 import {parseEnvFlag, resolveBaseUrl, resolveDashboardUrl, type Env} from "../lib/env";
 import {fingerprintToken} from "../lib/auth";
 import {buildHttpClient, assertTlsHardenedEnv, type HttpClient, type JwtSession} from "../lib/http";
@@ -11,7 +12,6 @@ import {
   readProfile,
   deriveProfileName,
   newProfile,
-  getOrCreateClientDeviceId,
   getDeviceName,
   setActiveBusinessId,
   type EnvState
@@ -79,7 +79,15 @@ async function browserFlow(args: LoginArgs): Promise<void> {
     jwt: session.seam
   });
 
-  const {code, verifier, state} = await authoriseInBrowser();
+  // Per-profile device identity (NOT machine-level): the backend keys CLI JWTs by
+  // userId+source+deviceId and evicts the prior token on each login. A shared machine id made
+  // every business-profile collide on one slot, expiring the others. On an explicit --profile
+  // re-login we reuse that profile's stored id (clean replace); a bare login mints a fresh id so
+  // it can never evict another profile (the resolved business isn't known until after the grant).
+  const reuseDeviceId = args.profile ? (await readProfile(args.profile))?.clientDeviceId : undefined;
+  const clientDeviceId = reuseDeviceId ?? randomUUID();
+
+  const {code, verifier, state} = await authoriseInBrowser(clientDeviceId);
   const grant = await exchangeForTokens(http, {code, verifier, state});
   session.setTokens(grant.tokens);
 
@@ -90,8 +98,46 @@ async function browserFlow(args: LoginArgs): Promise<void> {
     businessId: business.businessId
   });
 
+  // Which business this login binds to is decided by the DASHBOARD (the grant authorises
+  // whichever business your browser session is on), NOT the CLI's active profile. Guard the
+  // two ways that surprises the user.
+  const cfgBefore = await readConfig();
+  const previousActive = cfgBefore.activeProfile;
+  const existingForName = await readProfile(profileName);
+
+  // (a) Re-bind: the target profile already exists but points at a DIFFERENT business.
+  if (existingForName?.businessId && existingForName.businessId !== business.businessId) {
+    const proceed = await confirm({
+      message:
+        `Profile "${profileName}" is bound to business ${existingForName.businessId}` +
+        `${existingForName.displayName ? ` (${existingForName.displayName})` : ""}, but you just ` +
+        `authorised "${business.businessName ?? business.businessId}". Re-bind it to the new business?`,
+      default: false
+    }).catch(() => false);
+    if (!proceed) {
+      throw new AtoaError("Login cancelled — profile left unchanged.", "validation");
+    }
+  }
+
+  // (b) Heads-up: bare `login` followed the dashboard's business, not your active CLI profile.
+  if (!args.profile && previousActive && previousActive !== profileName) {
+    process.stderr.write(
+      `Note: active profile was "${previousActive}", but this login authorised business ` +
+        `"${business.businessName ?? business.businessId}" → profile "${profileName}" (now active).\n` +
+        "  Browser login uses whichever business your dashboard is currently on. To target a " +
+        "different business, switch it in the dashboard first, then re-run `atoa login`.\n"
+    );
+  }
+
   const store = await createSecretsStore();
-  const wasAlreadyActive = await persistBrowserLogin({store, env, profileName, tokens: session.getTokens(), business});
+  const wasAlreadyActive = await persistBrowserLogin({
+    store,
+    env,
+    profileName,
+    tokens: session.getTokens(),
+    business,
+    clientDeviceId
+  });
 
   const parts = [
     `✓ logged in to ${env} as profile "${profileName}" (${wasAlreadyActive ? "already active" : "now active"}) (${store.backend()})`,
@@ -145,10 +191,9 @@ function createInMemorySession(): LoginSession {
  * callback. Resolves with the one-time code plus the verifier/state needed
  * for the exchange. The loopback server validates the callback's state.
  */
-async function authoriseInBrowser(): Promise<{code: string; verifier: string; state: string}> {
+async function authoriseInBrowser(clientDeviceId: string): Promise<{code: string; verifier: string; state: string}> {
   const {verifier, challenge} = generatePkcePair();
   const state = generateState();
-  const clientDeviceId = await getOrCreateClientDeviceId();
   const deviceName = getDeviceName();
 
   // The loopback server must be listening BEFORE the browser opens — the grant
@@ -317,8 +362,9 @@ async function persistBrowserLogin(opts: {
   profileName: string;
   tokens: JwtTokens;
   business: ResolvedBusiness;
+  clientDeviceId: string;
 }): Promise<boolean> {
-  const {store, env, profileName, tokens, business} = opts;
+  const {store, env, profileName, tokens, business, clientDeviceId} = opts;
 
   await store.setJwtTokens(profileName, tokens);
 
@@ -336,7 +382,8 @@ async function persistBrowserLogin(opts: {
         businessId: business.businessId,
         displayName: business.businessName || existing.displayName,
         defaultEnv: env,
-        envs: {...existing.envs, [env]: {...existing.envs[env], ...jwtEnvState}}
+        envs: {...existing.envs, [env]: {...existing.envs[env], ...jwtEnvState}},
+        clientDeviceId
       }
     : {
         ...newProfile({
@@ -344,7 +391,8 @@ async function persistBrowserLogin(opts: {
           displayName: business.businessName || profileName,
           defaultEnv: env
         }),
-        envs: {[env]: jwtEnvState}
+        envs: {[env]: jwtEnvState},
+        clientDeviceId
       };
   await writeProfile(profileName, profile);
 

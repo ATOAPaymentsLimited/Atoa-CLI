@@ -4,6 +4,7 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {removeSdkKey, latestSdkAccessId, findSdkKey} from "../../lib/sdk-key-file";
+import {isInteractive} from "../../lib/output";
 
 type RevokeArgs = CommonOptions & {id?: string};
 
@@ -53,7 +54,14 @@ export default defineCommand({
       throw err;
     }
 
-    const removedFrom = await removeSdkKey(sdkAccessId);
-    ctx.print({env: keyEnv, sdkAccessId, revoked: true, removedFrom: removedFrom ?? null});
+    await removeSdkKey(sdkAccessId);
+
+    // Interactive terminal gets a one-line confirmation; scripting (piped / --output)
+    // keeps the machine-readable object.
+    if (isInteractive(ctx.formatExplicit)) {
+      process.stdout.write(`✓ Revoked SDK key ${sdkAccessId} (${keyEnv})\n`);
+    } else {
+      ctx.print({env: keyEnv, sdkAccessId, revoked: true});
+    }
   })
 });

@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {randomUUID} from "node:crypto";
 import {input, confirm, select} from "@inquirer/prompts";
 import {withCommonArgs, type CommonOptions} from "./_common";
 import {V1_ROUTES} from "../lib/v1-routes";
@@ -19,7 +20,6 @@ import {
   newProfile,
   readConfig,
   writeConfig,
-  getOrCreateClientDeviceId,
   getDeviceName,
   type EnvState
 } from "../lib/config-store";
@@ -133,7 +133,10 @@ async function otpSignup(args: SignupArgs, env: Env): Promise<string> {
 
   // Sign up — source=CLI + device makes the backend mint a CLI-source, device-keyed token
   // (UserAuthController.signUp extension) that the /v1 onboarding facade accepts.
-  const clientDeviceId = await getOrCreateClientDeviceId();
+  // Per-profile device id (not machine-level): reuse an explicit --profile's stored id, else a
+  // fresh one, so each profile gets its own backend session slot (see login.ts for the why).
+  const reuseDeviceId = args.profile ? (await readProfile(args.profile))?.clientDeviceId : undefined;
+  const clientDeviceId = reuseDeviceId ?? randomUUID();
   const deviceName = args.deviceName || getDeviceName();
   const signRes = await http.request({
     ...V1_ROUTES.auth.signUp,
@@ -160,8 +163,13 @@ async function otpSignup(args: SignupArgs, env: Env): Promise<string> {
   const envState: EnvState = {tokenFingerprint: fingerprintToken(grant.accessToken), authMode: "jwt"};
   const existing = await readProfile(profileName);
   const profile = existing
-    ? {...existing, defaultEnv: env, envs: {...existing.envs, [env]: {...existing.envs[env], ...envState}}}
-    : {...newProfile({businessId: "", displayName: email, defaultEnv: env}), envs: {[env]: envState}};
+    ? {
+        ...existing,
+        defaultEnv: env,
+        envs: {...existing.envs, [env]: {...existing.envs[env], ...envState}},
+        clientDeviceId
+      }
+    : {...newProfile({businessId: "", displayName: email, defaultEnv: env}), envs: {[env]: envState}, clientDeviceId};
   await writeProfile(profileName, profile);
 
   const cfg = await readConfig();

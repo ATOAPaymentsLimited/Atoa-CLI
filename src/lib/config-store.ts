@@ -1,7 +1,6 @@
 import {promises as fs} from "fs";
 import {hostname} from "os";
 import {join} from "path";
-import {randomUUID} from "crypto";
 import {configHomeDir, createSecretsStore} from "./secrets-store";
 
 export type Env = "sandbox" | "production";
@@ -21,6 +20,13 @@ export interface ProfileConfig {
   envs: Partial<Record<Env, EnvState>>;
   /** The business ID that was last selected/active in the dashboard for this profile. */
   activeBusinessId?: string;
+  /**
+   * Per-profile programmatic device id sent at login. Distinct per profile so the backend
+   * (which keys CLI JWTs by userId+source+deviceId and evicts the prior token on each login)
+   * gives every business-profile its OWN session slot — logging into one profile no longer
+   * expires another profile of the same user. Falls back to a fresh id when absent.
+   */
+  clientDeviceId?: string;
 }
 
 export interface AtoaConfig {
@@ -28,8 +34,6 @@ export interface AtoaConfig {
   schemaVersion: 1;
   activeProfile?: string;
   profiles: Record<string, ProfileConfig>;
-  /** Stable per-machine identifier sent with every programmatic grant request. */
-  clientDeviceId?: string;
 }
 
 export const CURRENT_SCHEMA_VERSION = 1 as const;
@@ -73,8 +77,7 @@ export async function readConfig(): Promise<AtoaConfig> {
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     activeProfile: parsed.activeProfile,
-    profiles: normalizeProfiles(parsed.profiles ?? {}),
-    clientDeviceId: parsed.clientDeviceId
+    profiles: normalizeProfiles(parsed.profiles ?? {})
   };
 }
 
@@ -86,7 +89,8 @@ function normalizeProfiles(profiles: Record<string, Partial<ProfileConfig>>): Re
       displayName: raw.displayName ?? name,
       defaultEnv: raw.defaultEnv,
       envs: raw.envs ?? {},
-      activeBusinessId: raw.activeBusinessId
+      activeBusinessId: raw.activeBusinessId,
+      clientDeviceId: raw.clientDeviceId
     };
   }
   return out;
@@ -138,11 +142,16 @@ export async function writeProfile(
   profile: Partial<ProfileConfig> & {businessId: string}
 ): Promise<void> {
   const cfg = await readConfig();
+  const existing = cfg.profiles[name];
   const next: ProfileConfig = {
     businessId: profile.businessId,
     displayName: profile.displayName ?? name,
     defaultEnv: profile.defaultEnv,
-    envs: profile.envs ?? {}
+    envs: profile.envs ?? {},
+    // Preserve sticky per-profile fields when a caller doesn't supply them, so a plain
+    // profile write never wipes the active business or the device id.
+    activeBusinessId: profile.activeBusinessId ?? existing?.activeBusinessId,
+    clientDeviceId: profile.clientDeviceId ?? existing?.clientDeviceId
   };
   cfg.profiles = {...cfg.profiles, [name]: next};
   await writeConfig(cfg);
@@ -293,22 +302,6 @@ export async function deriveProfileName(opts: {
 }
 
 // ---- Device identity ---------------------------------------------------------
-
-/**
- * Returns the stable per-machine device UUID. Generates and persists a new
- * random UUID on first call; subsequent calls return the same value.
- *
- * One UUID per config directory (not per profile) because backend sessions
- * are keyed on the physical device, not on which business you're working with.
- */
-export async function getOrCreateClientDeviceId(): Promise<string> {
-  const cfg = await readConfig();
-  if (cfg.clientDeviceId) return cfg.clientDeviceId;
-  const id = randomUUID();
-  cfg.clientDeviceId = id;
-  await writeConfig(cfg);
-  return id;
-}
 
 /**
  * Returns `os.hostname()` truncated to 64 chars. Falls back to "atoa-cli"
