@@ -181,7 +181,7 @@ describe('auth: "none"', () => {
     await client(session).request({...V1_ROUTES.auth.exchange, body: {code: "c", codeVerifier: "v"}});
 
     expect(sentHeaders(0)["Authorization"]).toBeUndefined();
-    expect(sentUrl(0)).toBe("https://api.atoa.me/api/v1/auth/exchange");
+    expect(sentUrl(0)).toBe("https://api.atoa.me/api/auth/extension-token/exchange");
   });
 });
 
@@ -207,7 +207,7 @@ describe("jwt 401 → refresh → replay", () => {
     expect(sentHeaders(0)["Authorization"]).toBe("Bearer jwt-access-1");
 
     // Call 1: the refresh round-trip — auth "none", body {refreshToken}.
-    expect(sentUrl(1)).toBe("https://api.atoa.me/api/v1/auth/refresh");
+    expect(sentUrl(1)).toBe("https://api.atoa.me/api/auth/extension-token/refresh");
     expect(sentHeaders(1)["Authorization"]).toBeUndefined();
     expect(undiciMock.fetch.mock.calls[1][1].body).toBe(JSON.stringify({refreshToken: "jwt-refresh-1"}));
 
@@ -290,7 +290,7 @@ describe("jwt refresh failure handling", () => {
 
     expect((err as AtoaError).kind).toBe("auth");
     expect(undiciMock.fetch).toHaveBeenCalledTimes(3); // original + ONE refresh + replay — never a 4th call
-    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) => String(c[0]).includes("/auth/refresh"));
+    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) => String(c[0]).includes("/auth/extension-token/refresh"));
     expect(refreshCalls).toHaveLength(1);
   });
 
@@ -310,7 +310,7 @@ describe("jwt refresh single-flight", () => {
   it("two parallel 401s produce exactly one refresh; both requests replay and succeed", async () => {
     let refreshCount = 0;
     undiciMock.fetch.mockImplementation(async (url: string, init: {headers: Record<string, string>}) => {
-      if (url.includes("/auth/refresh")) {
+      if (url.includes("/auth/extension-token/refresh")) {
         refreshCount++;
         // Hold the refresh open long enough for BOTH 401s to land on the latch.
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -351,7 +351,7 @@ describe("jwt refresh single-flight", () => {
     await http.request({method: "GET", path: "/api/v1/identity", auth: "jwt"});
     await http.request({method: "GET", path: "/api/v1/identity", auth: "jwt"});
 
-    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) => String(c[0]).includes("/auth/refresh"));
+    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) => String(c[0]).includes("/auth/extension-token/refresh"));
     expect(refreshCalls).toHaveLength(2);
     expect(jwt.current()).toEqual({accessToken: "a3", refreshToken: "r3"});
   });

@@ -256,7 +256,7 @@ function mapCallbackError(err: unknown): AtoaError {
 }
 
 /**
- * POST /v1/auth/exchange (no Authorization header). Verifies the echoed state
+ * POST /auth/extension-token/exchange (no Authorization header). Verifies the echoed state
  * before returning the pair — a mismatch means the code we redeemed wasn't
  * minted for THIS login attempt, so nothing may be stored.
  */

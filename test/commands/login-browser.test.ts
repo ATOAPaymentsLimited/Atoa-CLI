@@ -215,7 +215,7 @@ describe("login (browser PKCE flow)", () => {
     // Exchange: code + verifier, no Authorization header.
     expect(state.httpCalls[0]).toMatchObject({
       method: "POST",
-      path: "/api/v1/auth/exchange",
+      path: "/api/auth/extension-token/exchange",
       auth: "none",
       body: {code: "auth-code-1", codeVerifier: "test-verifier"}
     });
@@ -322,7 +322,7 @@ describe("login (browser PKCE flow)", () => {
 
     // exchange then a single businesses fetch — no identity call, no retry.
     const paths = state.httpCalls.map((c) => c.path);
-    expect(paths).toEqual(["/api/v1/auth/exchange", "/api/business/"]);
+    expect(paths).toEqual(["/api/auth/extension-token/exchange", "/api/business/"]);
 
     expect(state.activeBusinessCalls).toEqual([{profile: "beta-bakery", businessId: "b2"}]);
     expect(state.jwt["beta-bakery"]).toEqual({accessToken: "at-1", refreshToken: "rt-1"});

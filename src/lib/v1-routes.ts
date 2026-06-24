@@ -29,12 +29,12 @@ const jwt = (method: HttpMethod, path: string): V1Route => ({method, path, auth:
 
 export const V1_ROUTES = {
   auth: {
-    /** PKCE code exchange — no Authorization header. */
-    exchange: none("POST", "/api/v1/auth/exchange"),
+    /** PKCE code exchange — no Authorization header. Served by ExtensionAuthController. */
+    exchange: none("POST", "/api/auth/extension-token/exchange"),
     /** Rotate the access/refresh pair — no Authorization header. */
-    refresh: none("POST", "/api/v1/auth/refresh"),
+    refresh: none("POST", "/api/auth/extension-token/refresh"),
     /** Revoke the refresh token (logout) — no Authorization header. */
-    revoke: none("POST", "/api/v1/auth/revoke"),
+    revoke: none("POST", "/api/auth/extension-token/revoke"),
     // In-CLI OTP signup (BUD-019 Phase C). These are the EXISTING public app auth endpoints
     // (NOT the /v1 facade): send OTP → verify → otpVerifiedToken → sign-up (Bearer that token).
     otpSend: none("POST", "/api/otp/send"),

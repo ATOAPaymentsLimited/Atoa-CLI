@@ -7,7 +7,7 @@ import {join} from "path";
  * logout JWT-mode tests (BUD-019 Task 5).
  *
  * The CLI is JWT-only. Tests verify:
- *   - jwt mode: calls POST /api/v1/auth/revoke with refreshToken, then clears the JWT session
+ *   - jwt mode: calls POST /api/auth/extension-token/revoke with refreshToken, then clears the JWT session
  *   - jwt mode: proceeds with local cleanup even when server revoke fails
  *   - jwt mode: --dryRun reports intent without touching the session file
  *
