@@ -31,8 +31,34 @@ export function resolveDashboardUrl(): string {
 }
 
 export function assertSecureBaseUrl(): void {
-  const baseUrl = resolveBaseUrl();
-  if (baseUrl.startsWith("https://")) return;
+  assertHttps("BASE_URL", resolveBaseUrl());
+}
 
-  throw new Error(`Refusing to start: BASE_URL="${baseUrl}" must be https://. Rebuild with an https:// BASE_URL.`);
+/**
+ * The dashboard origin carries the PKCE code_challenge, state, and loopback
+ * redirect_uri in the browser-grant URL — an http:// dashboard sends the whole
+ * authorization request in plaintext, so it gets the same https guard as BASE_URL.
+ */
+export function assertSecureDashboardUrl(): void {
+  assertHttps("DASHBOARD_URL", resolveDashboardUrl());
+}
+
+function assertHttps(label: string, url: string): void {
+  if (url.startsWith("https://")) return;
+
+  // Local-dev escape hatch (npm run dev:local). Permit http:// ONLY when explicitly
+  // opted in AND the host is loopback — so the flag can never downgrade a real remote
+  // endpoint, even if it leaks into a shell.
+  if (process.env.ATOA_ALLOW_INSECURE === "1" && isLoopbackHost(url)) return;
+
+  throw new Error(`Refusing to start: ${label}="${url}" must be https://. Rebuild with an https:// ${label}.`);
+}
+
+function isLoopbackHost(raw: string): boolean {
+  try {
+    const {hostname} = new URL(raw);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
 }

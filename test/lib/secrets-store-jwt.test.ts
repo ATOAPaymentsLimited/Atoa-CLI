@@ -1,5 +1,4 @@
 /**
- * BUD-019 Phase 6 — Task 1
  * Tests for secrets-store JWT session storage:
  *   - setJwtTokens / getJwtTokens / clearJwtTokens
  *
@@ -11,12 +10,12 @@ import {describe, it, expect, beforeEach, afterEach} from "vitest";
 import {promises as fs} from "fs";
 import {tmpdir} from "os";
 import {join} from "path";
-import {createSecretsStore, sessionFilePath} from "../../src/lib/secrets-store";
+import {createSecretsStore, sessionFilePath, windowsLockdownArgs} from "../../src/lib/secrets-store";
 
 let scratchDir: string;
 
 async function withFileBackend(): Promise<void> {
-  scratchDir = await fs.mkdtemp(join(tmpdir(), "atoa-sec-bud019-"));
+  scratchDir = await fs.mkdtemp(join(tmpdir(), "atoa-sec-"));
   process.env.ATOA_HOME = scratchDir;
 }
 
@@ -120,5 +119,17 @@ describe("JWT token storage — file backend", () => {
     const store = await createSecretsStore();
 
     await expect(store.clearJwtTokens("never-set")).resolves.not.toThrow();
+  });
+});
+
+describe("windowsLockdownArgs (Windows ACL hardening)", () => {
+  it("strips inheritance and grants only the current user, inheritable to children", () => {
+    const args = windowsLockdownArgs("C:\\Users\\me\\.atoa\\auth", "me");
+    // path first, then the flags that make the credential files owner-only
+    expect(args[0]).toBe("C:\\Users\\me\\.atoa\\auth");
+    expect(args).toContain("/inheritance:r"); // drop ACEs inherited from the parent dir
+    expect(args).toContain("/grant:r"); // replace (not add) — sole grant is the user
+    expect(args).toContain("me:(OI)(CI)F"); // full control, inheritable to files (OI) + subdirs (CI)
+    expect(args).toContain("/T"); // reapply to anything already in the dir
   });
 });

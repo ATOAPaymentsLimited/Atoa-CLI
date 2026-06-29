@@ -1,8 +1,10 @@
+/* eslint-disable max-lines */
+/* eslint-disable complexity */
+/* eslint-disable max-lines-per-function */
 import {defineCommand} from "citty";
 import {randomUUID} from "node:crypto";
 import {select, confirm} from "@inquirer/prompts";
-import {parseEnvFlag, resolveBaseUrl, resolveDashboardUrl, type Env} from "../lib/env";
-import {fingerprintToken} from "../lib/auth";
+import {resolveBaseUrl, resolveDashboardUrl, assertSecureDashboardUrl} from "../lib/env";
 import {buildHttpClient, assertTlsHardenedEnv, type HttpClient, type JwtSession} from "../lib/http";
 import {createSecretsStore, type JwtTokens, type SecretsStore} from "../lib/secrets-store";
 import {
@@ -13,8 +15,7 @@ import {
   deriveProfileName,
   newProfile,
   getDeviceName,
-  setActiveBusinessId,
-  type EnvState
+  setActiveBusinessId
 } from "../lib/config-store";
 import {AtoaError, printError, exitCodeFor} from "../lib/errors";
 import {generatePkcePair, generateState} from "../lib/pkce";
@@ -24,7 +25,6 @@ import {V1_ROUTES} from "../lib/v1-routes";
 import {normalizeBusinesses, type BusinessSummary} from "../lib/businesses";
 
 interface LoginArgs {
-  env?: string;
   profile?: string;
 }
 
@@ -34,7 +34,6 @@ export default defineCommand({
     description: "Log in to an Atoa merchant account via your browser."
   },
   args: {
-    env: {type: "string", description: "sandbox|production (skips the interactive prompt when supplied)"},
     profile: {
       type: "string",
       description: "profile name to store credentials under (defaults to slugified business name)"
@@ -43,6 +42,7 @@ export default defineCommand({
   async run({args}) {
     try {
       assertTlsHardenedEnv();
+      assertSecureDashboardUrl();
       await browserFlow(args);
     } catch (err) {
       printError(err);
@@ -62,11 +62,9 @@ async function browserFlow(args: LoginArgs): Promise<void> {
   }
 
   // Browser (JWT) login authenticates against a single control-plane backend
-  // (resolveBaseUrl is env-independent), so there's no sandbox-vs-production auth
-  // choice to make here. Skip the prompt and default to production; `env` only
-  // namespaces the stored session and picks which env --provision-key mints for,
-  // both overridable with an explicit --env.
-  const env: Env = args.env ? parseEnvFlag(args.env) : "production";
+  // (resolveBaseUrl is env-independent), so there's no sandbox-vs-production choice
+  // to make: one session works for both envs. The profile is therefore NOT env-scoped.
+  // SDK/data commands pick their env separately (per-env keys in secret_key.json).
 
   // The JWT pair lives in memory until the profile name is known — it is
   // derived from the business we only discover via authenticated calls below.
@@ -132,7 +130,6 @@ async function browserFlow(args: LoginArgs): Promise<void> {
   const store = await createSecretsStore();
   const wasAlreadyActive = await persistBrowserLogin({
     store,
-    env,
     profileName,
     tokens: session.getTokens(),
     business,
@@ -140,7 +137,7 @@ async function browserFlow(args: LoginArgs): Promise<void> {
   });
 
   const parts = [
-    `✓ logged in to ${env} as profile "${profileName}" (${wasAlreadyActive ? "already active" : "now active"}) (${store.backend()})`,
+    `✓ logged in as profile "${profileName}" (${wasAlreadyActive ? "already active" : "now active"}) (${store.backend()})`,
     business.businessName ? `  business: ${business.businessName}` : null,
     "  auth: browser session (JWT)"
   ].filter(Boolean);
@@ -291,6 +288,8 @@ async function exchangeForTokens(
   return {tokens: {accessToken: grant.accessToken, refreshToken: grant.refreshToken}, businessId: grant.businessId};
 }
 
+// TODO confirm
+
 interface ResolvedBusiness {
   businessId: string;
   businessName?: string;
@@ -352,46 +351,37 @@ async function fetchBusinesses(http: HttpClient): Promise<BusinessSummary[]> {
 }
 
 /**
- * Stores the JWT pair under the now-known profile, writes/merges the profile
- * entry (authMode "jwt"), records the selected business, and promotes the
- * profile to active. Returns whether it was already active.
+ * Stores the JWT pair under the now-known profile (the session is env-independent, so it's
+ * keyed by profile only), writes/merges the profile entry, records the selected business, and
+ * promotes the profile to active. Returns whether it was already active. The profile is NOT
+ * env-scoped: per-env state (SDK keys) is created separately by `atoa keys create`.
  */
 async function persistBrowserLogin(opts: {
   store: SecretsStore;
-  env: Env;
   profileName: string;
   tokens: JwtTokens;
   business: ResolvedBusiness;
   clientDeviceId: string;
 }): Promise<boolean> {
-  const {store, env, profileName, tokens, business, clientDeviceId} = opts;
+  const {store, profileName, tokens, business, clientDeviceId} = opts;
 
   await store.setJwtTokens(profileName, tokens);
 
-  const jwtEnvState: EnvState = {
-    tokenFingerprint: fingerprintToken(tokens.accessToken),
-    authMode: "jwt"
-  };
-
-  // Merge with any existing profile so we don't blow away the OTHER env's
-  // state, and keep this env's sdkAccessId (the SDK key is still valid).
+  // Merge with any existing profile so we keep its per-env SDK state (envs) and defaultEnv
+  // untouched — browser login only refreshes the JWT session + business binding.
   const existing = await readProfile(profileName);
   const profile = existing
     ? {
         ...existing,
         businessId: business.businessId,
         displayName: business.businessName || existing.displayName,
-        defaultEnv: env,
-        envs: {...existing.envs, [env]: {...existing.envs[env], ...jwtEnvState}},
         clientDeviceId
       }
     : {
         ...newProfile({
           businessId: business.businessId,
-          displayName: business.businessName || profileName,
-          defaultEnv: env
+          displayName: business.businessName || profileName
         }),
-        envs: {[env]: jwtEnvState},
         clientDeviceId
       };
   await writeProfile(profileName, profile);

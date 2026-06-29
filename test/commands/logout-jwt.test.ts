@@ -4,7 +4,7 @@ import {tmpdir} from "os";
 import {join} from "path";
 
 /**
- * logout JWT-mode tests (BUD-019 Task 5).
+ * logout JWT-mode tests.
  *
  * The CLI is JWT-only. Tests verify:
  *   - jwt mode: calls POST /api/auth/extension-token/revoke with refreshToken, then clears the JWT session
@@ -16,6 +16,7 @@ import {join} from "path";
  */
 
 import {sessionFilePath, authDir} from "../../src/lib/secrets-store";
+import {sdkKeyFilePath} from "../../src/lib/sdk-key-file";
 import {configFilePath} from "../../src/lib/config-store";
 
 // logoutJwt does a best-effort server revoke via its OWN http client. Stub lib/http so tests never
@@ -40,7 +41,7 @@ import logout from "../../src/commands/logout";
 let scratch: string;
 
 beforeEach(async () => {
-  scratch = await fs.mkdtemp(join(tmpdir(), "atoa-logout-bud019-"));
+  scratch = await fs.mkdtemp(join(tmpdir(), "atoa-logout-"));
   process.env.ATOA_HOME = scratch;
   process.exitCode = 0;
 });
@@ -63,6 +64,15 @@ async function writeSessionFile(sessions: Record<string, {accessToken: string; r
 
 async function readSessions(): Promise<Record<string, {accessToken: string; refreshToken: string}>> {
   return JSON.parse(await fs.readFile(sessionFilePath(), "utf8")).sessions;
+}
+
+async function writeSdkKeyFile(keys: unknown[]): Promise<void> {
+  await fs.mkdir(authDir(), {recursive: true, mode: 0o700});
+  await fs.writeFile(sdkKeyFilePath(), JSON.stringify({keys}), {mode: 0o600});
+}
+
+async function readSdkKeys(): Promise<Array<{profile: string; env: string}>> {
+  return JSON.parse(await fs.readFile(sdkKeyFilePath(), "utf8")).keys;
 }
 
 /** Build a JWT-mode profile config */
@@ -120,16 +130,77 @@ describe("atoa logout — jwt mode", () => {
     stderr.mockRestore();
   });
 
+  it("--purgeKey removes the matching secret_key.json entry, leaving other profile/env entries", async () => {
+    await writeConfigFile(jwtProfile());
+    await writeSessionFile({acme: {accessToken: "at_abc", refreshToken: "rt_xyz"}});
+    await writeSdkKeyFile([
+      {env: "sandbox", sdkAccessId: "ak_1", apiSecret: "s1", profile: "acme", createdAt: "t1"},
+      {env: "production", sdkAccessId: "ak_2", apiSecret: "s2", profile: "acme", createdAt: "t2"},
+      {env: "sandbox", sdkAccessId: "ak_3", apiSecret: "s3", profile: "other", createdAt: "t3"}
+    ]);
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (logout.run as any)({args: {env: "sandbox", yes: true, purgeKey: true}, rawArgs: []});
+
+    // Only acme/sandbox is gone; the other env and the other profile survive.
+    const keys = await readSdkKeys();
+    expect(keys.map((k) => `${k.profile}/${k.env}`).sort()).toEqual(["acme/production", "other/sandbox"]);
+
+    stdout.mockRestore();
+    stderr.mockRestore();
+  });
+
+  it("--purgeKey WITHOUT --env removes every SDK key for the profile (all envs), sparing other profiles", async () => {
+    await writeConfigFile(jwtProfile());
+    await writeSessionFile({acme: {accessToken: "at_abc", refreshToken: "rt_xyz"}});
+    await writeSdkKeyFile([
+      {env: "sandbox", sdkAccessId: "ak_1", apiSecret: "s1", profile: "acme", createdAt: "t1"},
+      {env: "production", sdkAccessId: "ak_2", apiSecret: "s2", profile: "acme", createdAt: "t2"},
+      {env: "sandbox", sdkAccessId: "ak_3", apiSecret: "s3", profile: "other", createdAt: "t3"}
+    ]);
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    // No --env → purge all of the profile's keys.
+    await (logout.run as any)({args: {yes: true, purgeKey: true}, rawArgs: []});
+
+    // Both acme envs gone; the other profile's key survives.
+    const keys = await readSdkKeys();
+    expect(keys.map((k) => `${k.profile}/${k.env}`)).toEqual(["other/sandbox"]);
+
+    stdout.mockRestore();
+    stderr.mockRestore();
+  });
+
+  it("clears the JWT session without an --env flag (env-independent)", async () => {
+    await writeConfigFile(jwtProfile());
+    await writeSessionFile({acme: {accessToken: "at_abc", refreshToken: "rt_xyz"}});
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (logout.run as any)({args: {yes: true}, rawArgs: []});
+
+    expect((await readSessions()).acme).toBeUndefined();
+    expect(process.exitCode).toBe(0);
+
+    stdout.mockRestore();
+    stderr.mockRestore();
+  });
+
   it("--dryRun shows intent without touching files", async () => {
     await writeConfigFile(jwtProfile());
     await writeSessionFile({acme: {accessToken: "at_abc", refreshToken: "rt_xyz"}});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "sandbox", dryRun: true}, rawArgs: []});
+    await (logout.run as any)({args: {dryRun: true}, rawArgs: []});
 
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
     const parsed = JSON.parse(out);
-    expect(parsed.mode).toBe("jwt");
+    expect(parsed.action).toBe("logout");
     expect(parsed.willClearJwtTokens).toBe(true);
     expect(parsed.willRevokeRefreshToken).toBe(true);
 

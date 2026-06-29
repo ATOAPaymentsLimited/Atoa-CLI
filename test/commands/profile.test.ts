@@ -269,7 +269,7 @@ describe("profile set", () => {
     process.exitCode = 0;
   });
 
-  it("rejects switching to an env with no credentials", async () => {
+  it("switches defaultEnv even when that env has no stored credentials (JWT is env-independent)", async () => {
     await writeConfig({
       schemaVersion: 1,
       activeProfile: "acme",
@@ -277,13 +277,13 @@ describe("profile set", () => {
         acme: {businessId: "b1", displayName: "Acme", defaultEnv: "sandbox", envs: {sandbox: {tokenFingerprint: "x"}}}
       }
     });
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (set.run as any)({args: {assignment: "env=production", yes: true}, rawArgs: []});
-    const err = stderr.mock.calls.map((c) => String(c[0])).join("");
-    expect(err).toMatch(/has no production credentials/);
-    expect(process.exitCode).toBe(3);
-    stderr.mockRestore();
-    process.exitCode = 0;
+    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
+    // No per-env credential gate any more: defaultEnv just records the SDK/data command default.
+    expect(out).toMatch(/env = production/);
+    expect(process.exitCode).toBe(0);
+    stdout.mockRestore();
   });
 
   it("no-ops when the new env equals the current default", async () => {

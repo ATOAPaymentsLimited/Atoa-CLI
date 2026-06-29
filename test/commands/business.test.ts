@@ -1,7 +1,7 @@
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
 /**
- * business list + business use tests (BUD-019 Task 6).
+ * business list + business use tests.
  *
  * Verifies:
  *   - business list → GET /api/business/, marks active one

@@ -23,18 +23,17 @@ export interface LoopbackServer {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-// Branded callback page shown in the browser after the OAuth grant. Standalone HTML (the
-// loopback server can't reach the dashboard's Vuetify/Regal), so Atoa's palette is inlined:
-// brand #e42646, ink #0d1011, muted #475664, bg #fbfcfc, border #eaeef0.
+// Branded callback page shown in the browser after the OAuth grant. FULLY self-contained:
+// no remote fonts, logo, or any other asset — so it renders offline and never beacons the
+// user's IP + login event to a third party (Google Fonts / WordPress CDN). Atoa's palette is
+// inlined: brand #e42646, ink #0d1011, muted #475664, bg #fbfcfc, border #eaeef0; the wordmark
+// is plain text and the font falls back to the system stack.
 const callbackPage = (opts: {title: string; heading: string; message: string; ok: boolean}): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${opts.title}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root { --brand:#e42646; --ink:#0d1011; --muted:#475664; --bg:#fbfcfc; --card:#ffffff; --border:#eaeef0; }
   * { box-sizing:border-box; }
@@ -45,8 +44,7 @@ const callbackPage = (opts: {title: string; heading: string; message: string; ok
   .card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--border);
     border-radius:16px; padding:40px 32px; text-align:center;
     box-shadow:0 1px 2px rgba(13,16,17,.04), 0 8px 24px rgba(13,16,17,.06); }
-  .brand { margin-bottom:28px; }
-  .brand img { height:26px; width:auto; }
+  .brand { margin-bottom:28px; font-size:22px; font-weight:800; letter-spacing:-.02em; color:var(--brand); }
   .icon { width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; }
   .icon.ok { background:#ecfdf3; } .icon.err { background:#fef3f2; }
   h1 { font-size:20px; font-weight:700; margin:0 0 8px; letter-spacing:-.01em; }
@@ -55,7 +53,7 @@ const callbackPage = (opts: {title: string; heading: string; message: string; ok
 </head>
 <body>
   <main class="card">
-    <div class="brand"><img src="https://paywithatoa.co.uk/wp-content/uploads/2025/06/red-trademark-logo.svg" alt="Atoa" height="26"></div>
+    <div class="brand">atoa</div>
     <div class="icon ${opts.ok ? "ok" : "err"}">
       ${
         opts.ok
@@ -127,15 +125,22 @@ export async function startLoopbackServer(opts: {expectedState: string; timeoutM
       return;
     }
 
-    if (error) {
-      res.writeHead(200, {"Content-Type": "text/html"}).end(ERROR_HTML);
-      settle(() => reject(new Error(`OAuth error: ${error} (user denied or provider error)`)));
+    // Validate `state` FIRST, for EVERY branch (success and error alike). A callback that
+    // doesn't carry our exact state isn't from this login attempt — it could be any local
+    // process trying to settle (and thereby DENY) the real login by hitting e.g.
+    // `/callback?error=access_denied`. Ignore it WITHOUT settling: 404 and keep waiting for
+    // the genuine callback (the 180s timeout still bounds the wait). Settling here — even as
+    // a rejection — would turn the CSRF gate into a denial primitive.
+    // NOTE: the dashboard echoes `state` on the denial redirect too (OAuth 2.0 §4.1.2.1), so
+    // a genuine "user denied" still matches and rejects below.
+    if (state !== expectedState) {
+      res.writeHead(404).end("Not Found");
       return;
     }
 
-    if (state !== expectedState) {
+    if (error) {
       res.writeHead(200, {"Content-Type": "text/html"}).end(ERROR_HTML);
-      settle(() => reject(new Error("OAuth state mismatch (CSRF check failed): unexpected state parameter")));
+      settle(() => reject(new Error(`OAuth error: ${error} (user denied or provider error)`)));
       return;
     }
 

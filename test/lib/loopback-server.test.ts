@@ -1,5 +1,4 @@
 /**
- * BUD-019 Phase 6 — Task 2
  * Tests for the loopback OAuth callback server.
  *
  * These are real-socket tests using Node's built-in fetch (Node 18+) or undici.
@@ -43,15 +42,26 @@ describe("startLoopbackServer — happy path", () => {
 });
 
 describe("startLoopbackServer — error paths", () => {
-  it("rejects result with a CSRF error on state mismatch", async () => {
+  it("ignores a state-mismatch callback (404, does NOT settle) and still accepts the genuine one", async () => {
     const server = await startLoopbackServer({expectedState: "correct-state", timeoutMs: 5000});
-    void get(`http://127.0.0.1:${server.port}/callback?code=c&state=wrong-state`);
-    await expect(server.result).rejects.toThrow(/state mismatch|CSRF/i);
+    // A forged/cross-session callback with the wrong state must be ignored, not allowed to
+    // settle — otherwise it becomes a login-denial primitive. It gets a 404 and the result
+    // promise stays pending.
+    const forged = await get(`http://127.0.0.1:${server.port}/callback?code=c&state=wrong-state`);
+    expect(forged.status).toBe(404);
+    // The genuine callback (correct state) afterwards still resolves.
+    void get(`http://127.0.0.1:${server.port}/callback?code=real_code&state=correct-state`);
+    const result = await server.result;
+    expect(result).toEqual({code: "real_code"});
     server.close();
   });
 
-  it("rejects result when error=access_denied", async () => {
+  it("ignores a stateless error callback (cannot force a denial) but rejects a state-matching denial", async () => {
     const server = await startLoopbackServer({expectedState: "s", timeoutMs: 5000});
+    // Stateless error injection — must be ignored (404), result stays pending.
+    const forged = await get(`http://127.0.0.1:${server.port}/callback?error=access_denied`);
+    expect(forged.status).toBe(404);
+    // A genuine denial carries the state (OAuth echoes it) and DOES reject.
     void get(`http://127.0.0.1:${server.port}/callback?error=access_denied&state=s`);
     await expect(server.result).rejects.toThrow(/access.denied|denied/i);
     server.close();

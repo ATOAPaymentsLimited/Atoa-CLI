@@ -1,7 +1,7 @@
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
 /**
- * sessions list + sessions revoke tests (BUD-019 Task 5).
+ * sessions list + sessions revoke tests.
  *
  * Verifies:
  *   - sessions list → GET /api/v1/auth/sessions, prints data

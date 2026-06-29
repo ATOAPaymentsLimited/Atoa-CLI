@@ -1,9 +1,9 @@
 import {promises as fs} from "fs";
-import {join, dirname} from "path";
-import {authDir} from "./secrets-store";
+import {join} from "path";
+import {authDir, ensureAuthDirSecure} from "./secrets-store";
 
 /**
- * SDK keys are written to a plain JSON file at ~/atoa/auth/secret_key.json (owner-only, 0600)
+ * SDK keys are written to a plain JSON file at ~/.atoa/auth/secret_key.json (owner-only, 0600)
  * rather than the OS keychain — so an external coding agent can read the secret to use as the
  * SDK bearer for `get`/`post`/`delete` calls. The file holds an array under `keys`.
  */
@@ -30,9 +30,9 @@ async function readAll(): Promise<SdkKeyRecord[]> {
 
 async function writeAll(keys: SdkKeyRecord[]): Promise<string> {
   const fp = sdkKeyFilePath();
-  await fs.mkdir(dirname(fp), {recursive: true});
+  await ensureAuthDirSecure();
   await fs.writeFile(fp, JSON.stringify({keys}, null, 2) + "\n", {mode: 0o600});
-  await fs.chmod(fp, 0o600).catch(() => undefined);
+  if (process.platform !== "win32") await fs.chmod(fp, 0o600).catch(() => undefined);
   return fp;
 }
 
@@ -48,6 +48,32 @@ export async function removeSdkKey(sdkAccessId: string): Promise<string | null> 
   const keys = await readAll();
   if (keys.length === 0) return null;
   return writeAll(keys.filter((k) => k.sdkAccessId !== sdkAccessId));
+}
+
+/** Remove every key entry for a profile+env (logout --purge-key --env). Returns the file path, or null if nothing matched. */
+export async function removeSdkKeysFor(profile: string, env: string): Promise<string | null> {
+  const keys = await readAll();
+  const remaining = keys.filter((k) => !(k.profile === profile && k.env === env));
+  if (remaining.length === keys.length) return null;
+  return writeAll(remaining);
+}
+
+/** Remove every key entry for a profile across all envs (logout --purge-key, no --env). Returns the file path, or null if nothing matched. */
+export async function removeSdkKeysForProfile(profile: string): Promise<string | null> {
+  const keys = await readAll();
+  const remaining = keys.filter((k) => k.profile !== profile);
+  if (remaining.length === keys.length) return null;
+  return writeAll(remaining);
+}
+
+/** True if any stored SDK key belongs to this profile (any env). */
+export async function hasSdkKeysForProfile(profile: string): Promise<boolean> {
+  return (await readAll()).some((k) => k.profile === profile);
+}
+
+/** True if any stored SDK key matches this profile+env. Read-only — for dry-run previews. */
+export async function hasSdkKeyFor(profile: string, env: string): Promise<boolean> {
+  return (await readAll()).some((k) => k.profile === profile && k.env === env);
 }
 
 /** Find a stored key by sdkAccessId — e.g. to read its env before revoking. */

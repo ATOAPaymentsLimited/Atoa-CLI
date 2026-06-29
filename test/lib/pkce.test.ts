@@ -1,5 +1,4 @@
 /**
- * BUD-019 Phase 6 — Task 2
  * Tests for PKCE S256 primitives.
  */
 import {describe, it, expect} from "vitest";

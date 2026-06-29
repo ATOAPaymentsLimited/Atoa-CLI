@@ -6,7 +6,12 @@ import {configHomeDir, createSecretsStore} from "./secrets-store";
 export type Env = "sandbox" | "production";
 
 export interface EnvState {
-  tokenFingerprint: string;
+  /**
+   * @deprecated No longer written. Was the last 4 chars of the (SDK) token, consumed by an
+   * env-mismatch check that has since been removed. Kept optional so older config.json files
+   * still parse; JWT logins never persist it (a JWT substring in plaintext config served no purpose).
+   */
+  tokenFingerprint?: string;
   /** Opaque identifier for the SDK access key. Used by the revoke/regenerate endpoints. */
   sdkAccessId?: string;
   /** Whether this profile+env uses JWT browser login or the legacy SDK paste flow. */
@@ -405,7 +410,7 @@ export async function setAuthMode(profileName: string, env: Env, mode: "jwt" | "
   if (!cfg.profiles[profileName]) {
     throw new Error(`No profile named "${profileName}". Run \`atoa profile list\` to see available profiles.`);
   }
-  const existing = cfg.profiles[profileName].envs[env] ?? {tokenFingerprint: ""};
+  const existing = cfg.profiles[profileName].envs[env] ?? {};
   cfg.profiles[profileName].envs[env] = {...existing, authMode: mode};
   await writeConfig(cfg);
 }

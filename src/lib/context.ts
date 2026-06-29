@@ -1,6 +1,6 @@
 import {parseEnvFlag, resolveBaseUrl, type Env} from "./env";
 import {buildAuthHeader, fingerprintToken} from "./auth";
-import {latestSdkSecret, saveSdkKey} from "./sdk-key-file";
+import {latestSdkSecret} from "./sdk-key-file";
 import {createSecretsStore} from "./secrets-store";
 import {
   getActiveBusinessId,
@@ -94,7 +94,7 @@ export async function buildContext(
   const authHeader = "unused";
   const authFingerprint = "";
 
-  // JWT session seam for `auth: "jwt"` requests (BUD-019). Bound to the
+  // JWT session seam for `auth: "jwt"` requests. Bound to the
   // resolved profile + env so the HTTP layer stays store-agnostic.
   const profileName = resolved.name;
   const http = buildHttpClient({
@@ -127,39 +127,27 @@ export async function buildContext(
 }
 
 /**
- * Guard for the SDK-key commands: returns the SDK bearer for `env`, prompting for and storing one
- * if none exists. The key is kept ONLY in ~/atoa/auth/secret_key.json (never the OS keychain).
+ * Guard for the SDK-key commands: returns the stored SDK bearer for `env`. SDK keys must be
+ * minted explicitly (`atoa keys create` or `atoa login --provision-key`) so they always carry a
+ * revocable sdkAccessId. There is deliberately NO paste-and-store fallback — pasting a raw secret
+ * would persist an un-revocable plaintext key (no sdkAccessId for `atoa keys revoke` to target).
+ * The key is kept ONLY in ~/.atoa/auth/secret_key.json (never the OS keychain).
  */
 export async function ensureSdkKey(env: Env): Promise<string> {
   const existing = await latestSdkSecret(env);
   if (existing) return existing;
 
-  if (!process.stdout.isTTY) {
-    throw new AtoaError(
-      `No Atoa API key stored for ${env}. Run \`atoa keys create --env ${env}\` (or paste one interactively in a terminal), then retry.`,
-      "auth"
-    );
-  }
-
-  const {password} = await import("@inquirer/prompts");
-  const key = (await password({message: `Paste your Atoa ${env} API key:`, mask: "*"})).trim();
-  if (!key) throw new AtoaError("API key cannot be empty", "validation");
-
-  const savedTo = await saveSdkKey({
-    env,
-    sdkAccessId: null,
-    apiSecret: key,
-    profile: "sdk",
-    createdAt: new Date().toISOString()
-  });
-  process.stderr.write(`✓ API key stored at ${savedTo}\n`);
-  return key;
+  throw new AtoaError(
+    `No Atoa API key stored for ${env}. Mint a revocable one with \`atoa keys create --env ${env}\` ` +
+      `or \`atoa login --env ${env} --provision-key\`, then retry.`,
+    "auth"
+  );
 }
 
 /**
  * Context for the SDK-key commands (customers, payments, refunds, …). Unlike buildContext it does
- * NOT require a JWT login — it authenticates with the stored SDK key (file-based, no keychain),
- * prompting for one via ensureSdkKey when missing. dry-run skips the key entirely (no request sent).
+ * NOT require a JWT login — it authenticates with the stored SDK key (file-based, no keychain).
+ * Errors via ensureSdkKey when no key is stored. dry-run skips the key entirely (no request sent).
  */
 export async function buildSdkContext(opts: CommonOptions): Promise<CommandContext> {
   assertTlsHardenedEnv();

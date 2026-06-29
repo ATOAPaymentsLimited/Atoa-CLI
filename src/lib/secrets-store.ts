@@ -1,5 +1,6 @@
 import {promises as fs} from "fs";
-import {homedir} from "os";
+import {spawn} from "node:child_process";
+import {homedir, userInfo} from "os";
 import {join} from "path";
 
 export type SecretsEnv = "sandbox" | "production";
@@ -70,10 +71,53 @@ async function readSessionFile(): Promise<SessionFile> {
   }
 }
 
+/**
+ * icacls argv that locks `dir` to `user` only: `/inheritance:r` strips inherited
+ * ACEs, `/grant:r user:(OI)(CI)F` grants the user full control and makes the ACE
+ * inheritable to files (OI) and subdirs (CI) so the credential files created inside
+ * are owner-only too; `/T` reapplies to anything already there, `/C /Q` continue
+ * quietly. Pure so it can be unit-tested without spawning.
+ */
+export function windowsLockdownArgs(dir: string, user: string): string[] {
+  return [dir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`, "/T", "/C", "/Q"];
+}
+
+/**
+ * Windows has no 0600 — `fs` mode is ignored, so files inherit the parent dir's ACL
+ * (often readable by other accounts). Lock the dir down with icacls instead. POSIX
+ * relies on the 0700 dir + 0600 files and skips this. Best-effort: on failure we warn
+ * rather than crash login, but never silently leave the files exposed.
+ */
+async function lockdownWindows(dir: string): Promise<void> {
+  if (process.platform !== "win32") return;
+  const ok = await new Promise<boolean>((resolve) => {
+    try {
+      const child = spawn("icacls", windowsLockdownArgs(dir, userInfo().username), {stdio: "ignore"});
+      child.once("error", () => resolve(false));
+      child.once("close", (code) => resolve(code === 0));
+    } catch {
+      resolve(false);
+    }
+  });
+  if (!ok) {
+    process.stderr.write(
+      `Warning: could not restrict permissions on ${dir} (icacls failed). ` +
+        `Credential files there may be readable by other accounts on this machine — secure them manually.\n`
+    );
+  }
+}
+
+/** Create the auth dir (0700 on POSIX) and lock it to the current user on Windows. */
+export async function ensureAuthDirSecure(): Promise<void> {
+  const dir = authDir();
+  await fs.mkdir(dir, {recursive: true, mode: 0o700});
+  await lockdownWindows(dir);
+}
+
 async function writeSessionFile(data: SessionFile): Promise<void> {
   const fp = sessionFilePath();
   const tmp = `${fp}.tmp.${process.pid}`;
-  await fs.mkdir(authDir(), {recursive: true, mode: 0o700});
+  await ensureAuthDirSecure();
   await fs.writeFile(tmp, JSON.stringify(data, null, 2) + "\n", {mode: 0o600});
   await fs.rename(tmp, fp);
   if (process.platform !== "win32") await fs.chmod(fp, 0o600);

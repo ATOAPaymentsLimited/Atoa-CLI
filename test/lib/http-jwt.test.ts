@@ -72,7 +72,7 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// sdk mode (the default) — regression: pre-BUD-019 call sites are untouched
+// sdk mode (the default) — regression: legacy SDK call sites are untouched
 // ---------------------------------------------------------------------------
 
 describe("auth mode resolution — sdk default", () => {
@@ -290,7 +290,9 @@ describe("jwt refresh failure handling", () => {
 
     expect((err as AtoaError).kind).toBe("auth");
     expect(undiciMock.fetch).toHaveBeenCalledTimes(3); // original + ONE refresh + replay — never a 4th call
-    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) => String(c[0]).includes("/auth/extension-token/refresh"));
+    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) =>
+      String(c[0]).includes("/auth/extension-token/refresh")
+    );
     expect(refreshCalls).toHaveLength(1);
   });
 
@@ -351,7 +353,9 @@ describe("jwt refresh single-flight", () => {
     await http.request({method: "GET", path: "/api/v1/identity", auth: "jwt"});
     await http.request({method: "GET", path: "/api/v1/identity", auth: "jwt"});
 
-    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) => String(c[0]).includes("/auth/extension-token/refresh"));
+    const refreshCalls = undiciMock.fetch.mock.calls.filter((c) =>
+      String(c[0]).includes("/auth/extension-token/refresh")
+    );
     expect(refreshCalls).toHaveLength(2);
     expect(jwt.current()).toEqual({accessToken: "a3", refreshToken: "r3"});
   });

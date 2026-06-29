@@ -51,10 +51,12 @@ export function runWithContext<Args extends CommonOptions>(handler: Handler<Args
   };
 }
 
+// TODO: Regenerate should ask for creating a new one
+
 /**
  * Like runWithContext, but for the SDK-key commands: builds an SDK-authenticated context
- * (no JWT login required) and runs the guard that prompts for + stores an API key in
- * ~/atoa/auth/secret_key.json when none exists.
+ * (no JWT login required). Errors with a "run `atoa keys create`" hint when no SDK key is
+ * stored in ~/.atoa/auth/secret_key.json — keys must be minted explicitly so they stay revocable.
  */
 export function runWithSdkKey<Args extends CommonOptions>(handler: Handler<Args>) {
   return async ({args: ctxArgs, rawArgs = []}: CittyContext<ArgsDef>): Promise<void> => {

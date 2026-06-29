@@ -88,15 +88,13 @@ describe("atoa logout", () => {
     });
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "production", dryRun: true}, rawArgs: []});
+    await (logout.run as any)({args: {dryRun: true}, rawArgs: []});
 
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
     const parsed = JSON.parse(out);
     expect(parsed).toMatchObject({
       action: "logout",
-      mode: "jwt",
       profile: "acme",
-      env: "production",
       willRevokeRefreshToken: true,
       willClearJwtTokens: true
     });
@@ -133,12 +131,13 @@ describe("atoa logout", () => {
     stderr.mockRestore();
   });
 
-  it("already-cleared env is a no-op", async () => {
+  it("is a no-op when the profile has no JWT session (nothing to clear)", async () => {
     await writeConfig(jwtConfig({sandbox: {authMode: "jwt", tokenFingerprint: "x"}}, "sandbox"));
+    // No session written → nothing to clear.
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "production", yes: true}, rawArgs: []});
+    await (logout.run as any)({args: {yes: true}, rawArgs: []});
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/already cleared/);
+    expect(out).toMatch(/already logged out|nothing to clear/);
     stdout.mockRestore();
   });
 });

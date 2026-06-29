@@ -224,22 +224,24 @@ describe("login (browser PKCE flow)", () => {
     expect(state.httpCalls[1]).toMatchObject({method: "GET", path: "/api/business/", auth: "jwt"});
     expect(state.httpCalls.map((c) => c.path)).not.toContain("/api/v1/identity");
 
-    // Tokens stored under the derived profile (env-independent key); profile persisted with authMode jwt.
+    // Tokens stored under the derived profile (env-independent key). The profile is NOT env-scoped:
+    // login writes no per-env slot — the JWT session above is the source of truth for "logged in".
     expect(state.jwt["acme-coffee"]).toEqual({accessToken: "at-1", refreshToken: "rt-1"});
     const profile = (
       state.config.profiles as Record<
         string,
-        {businessId: string; envs: Record<string, unknown>; clientDeviceId?: string}
+        {businessId: string; envs: Record<string, unknown>; defaultEnv?: string; clientDeviceId?: string}
       >
     )["acme-coffee"];
     expect(profile.businessId).toBe("biz_1");
-    expect(profile.envs.sandbox).toMatchObject({authMode: "jwt"});
+    expect(profile.envs).toEqual({});
+    expect(profile.defaultEnv).toBeUndefined();
     expect(state.config.activeProfile).toBe("acme-coffee");
     // The minted device id is persisted on the profile and matches the one sent in the grant.
     expect(profile.clientDeviceId).toBe(url.searchParams.get("client_device_id"));
 
     expect(stderr()).toMatch(/if it doesn't open, visit/i);
-    expect(stdout()).toMatch(/logged in to sandbox as profile "acme-coffee"/);
+    expect(stdout()).toMatch(/logged in as profile "acme-coffee"/);
     expect(stdout()).toMatch(/business: Acme Coffee/);
   });
 

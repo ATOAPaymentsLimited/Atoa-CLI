@@ -3,7 +3,7 @@ import type {AuthMode, HttpMethod} from "./http";
 /**
  * Declarative route table for the CLI's backend calls.
  *
- * Two surfaces (BUD-019 teardown, 2026-06-18):
+ * Two surfaces (2026-06-18):
  *  - A small **programmatic-only /v1 facade** that has no merchant-app equivalent:
  *    auth token lifecycle, device `sessions`, CLI-scoped `apiKeys`, `onboarding`,
  *    and `stores.linkBank`. These stay under /api/v1/... .
@@ -35,7 +35,7 @@ export const V1_ROUTES = {
     refresh: none("POST", "/api/auth/extension-token/refresh"),
     /** Revoke the refresh token (logout) — no Authorization header. */
     revoke: none("POST", "/api/auth/extension-token/revoke"),
-    // In-CLI OTP signup (BUD-019 Phase C). These are the EXISTING public app auth endpoints
+    // In-CLI OTP signup. These are the EXISTING public app auth endpoints
     // (NOT the /v1 facade): send OTP → verify → otpVerifiedToken → sign-up (Bearer that token).
     otpSend: none("POST", "/api/otp/send"),
     otpVerify: none("POST", "/api/otp/verify-otp"),

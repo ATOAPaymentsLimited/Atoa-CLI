@@ -33,7 +33,11 @@ function openerFor(platform: NodeJS.Platform, url: string): {command: string; ar
       // `start` is a cmd.exe builtin, not an executable — it must run via cmd.
       // The empty quoted first argument is the window title; without it, start
       // would treat a quoted URL as the title and open nothing.
-      return {command: "cmd", args: ["/c", "start", '""', url]};
+      // The URL itself MUST be quoted: cmd treats `&`/`^`/`%` as special even in
+      // args, and the grant URL always has multiple `&` query params — unquoted it
+      // gets truncated at the first `&` and the login breaks. (PKCE/UUID params
+      // never contain a literal `"`, so wrapping in quotes is safe.)
+      return {command: "cmd", args: ["/c", "start", '""', `"${url}"`]};
     default:
       return {command: "xdg-open", args: [url]};
   }

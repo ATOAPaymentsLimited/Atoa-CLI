@@ -1,5 +1,4 @@
 /**
- * BUD-019 Phase 6 — Task 1
  * Tests for new config-store additions:
  *   - getDeviceName()
  *   - activeBusinessId get/set helpers
@@ -27,7 +26,7 @@ let tmpHome: string;
 const origAtoaHome = process.env.ATOA_HOME;
 
 beforeEach(async () => {
-  tmpHome = await fs.mkdtemp(join(tmpdir(), "atoa-cfg-bud019-"));
+  tmpHome = await fs.mkdtemp(join(tmpdir(), "atoa-cfg-"));
   process.env.ATOA_HOME = tmpHome;
 });
 

@@ -1,3 +1,5 @@
+/* eslint-disable complexity */
+/* eslint-disable max-lines-per-function */
 import {defineCommand} from "citty";
 import {randomUUID} from "node:crypto";
 import {input, confirm, select} from "@inquirer/prompts";
@@ -7,8 +9,7 @@ import {AtoaError, printError, exitCodeFor} from "../lib/errors";
 import {buildContext, type CommandContext} from "../lib/context";
 import {buildHttpClient, assertTlsHardenedEnv} from "../lib/http";
 import {createSecretsStore} from "../lib/secrets-store";
-import {fingerprintToken} from "../lib/auth";
-import {parseEnvFlag, resolveBaseUrl, type Env} from "../lib/env";
+import {resolveBaseUrl} from "../lib/env";
 import {
   setActiveBusinessId,
   getActiveBusinessId,
@@ -20,8 +21,7 @@ import {
   newProfile,
   readConfig,
   writeConfig,
-  getDeviceName,
-  type EnvState
+  getDeviceName
 } from "../lib/config-store";
 import {withOtp} from "../lib/otp";
 import {isInteractive, renderKeyValues} from "../lib/output";
@@ -48,11 +48,10 @@ export default defineCommand({
     const args = cittyArgs as unknown as SignupArgs;
     try {
       assertTlsHardenedEnv();
-      const env: Env = args.env ? parseEnvFlag(args.env) : "production";
 
       // Step 0: ensure we have a session. A brand-new user has none → create the
       // account here (email + OTP). If a session already exists, this is a no-op.
-      const signupEmail = await ensureSignedUp(args, env);
+      const signupEmail = await ensureSignedUp(args);
 
       // allowIncomplete: a freshly-created account has no businessId until step-1 below.
       const ctx = await buildContext(args, {allowIncomplete: true});
@@ -65,18 +64,19 @@ export default defineCommand({
 });
 
 /**
- * Ensures the resolved profile has a JWT session for `env`. When it doesn't (the
- * common new-user case), runs the in-CLI OTP signup to create the account and store
- * a CLI-source session. No-op when a session already exists.
+ * Ensures the resolved profile has a JWT session. When it doesn't (the common new-user case),
+ * runs the in-CLI OTP signup to create the account and store a CLI-source session. The session
+ * is env-independent (keyed by profile), so there's no env to thread here. No-op when a session
+ * already exists.
  */
-async function ensureSignedUp(args: SignupArgs, env: Env): Promise<string | undefined> {
+async function ensureSignedUp(args: SignupArgs): Promise<string | undefined> {
   const resolved = await resolveActiveProfile(args.profile);
   if (resolved.kind === "ok") {
     const store = await createSecretsStore();
     const tokens = await store.getJwtTokens(resolved.name);
-    if (tokens) return undefined; // already signed in for this env
+    if (tokens) return undefined; // already signed in
   }
-  return otpSignup(args, env);
+  return otpSignup(args);
 }
 
 /**
@@ -84,7 +84,7 @@ async function ensureSignedUp(args: SignupArgs, env: Env): Promise<string | unde
  *   otp/send → otp/verify-otp (→ otpVerifiedToken) → user/auth/sign-up (Bearer that token,
  *   source=CLI + device → CLI-source JWT). Stores the session and activates the profile.
  */
-async function otpSignup(args: SignupArgs, env: Env): Promise<string> {
+async function otpSignup(args: SignupArgs): Promise<string> {
   if (!process.stdin.isTTY) {
     throw new AtoaError("atoa signup needs an interactive terminal (email + OTP). Run it in a terminal.", "validation");
   }
@@ -160,16 +160,12 @@ async function otpSignup(args: SignupArgs, env: Env): Promise<string> {
   const store = await createSecretsStore();
   await store.setJwtTokens(profileName, {accessToken: grant.accessToken, refreshToken: grant.refreshToken});
 
-  const envState: EnvState = {tokenFingerprint: fingerprintToken(grant.accessToken), authMode: "jwt"};
+  // The profile is NOT env-scoped — the JWT session (just stored) is env-independent. Per-env
+  // state (SDK keys) is created separately later. Merge to preserve any existing envs/defaultEnv.
   const existing = await readProfile(profileName);
   const profile = existing
-    ? {
-        ...existing,
-        defaultEnv: env,
-        envs: {...existing.envs, [env]: {...existing.envs[env], ...envState}},
-        clientDeviceId
-      }
-    : {...newProfile({businessId: "", displayName: email, defaultEnv: env}), envs: {[env]: envState}, clientDeviceId};
+    ? {...existing, clientDeviceId}
+    : {...newProfile({businessId: "", displayName: email}), clientDeviceId};
   await writeProfile(profileName, profile);
 
   const cfg = await readConfig();
@@ -260,8 +256,10 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs, signupEmail?
 
     const legalBusinessName = await input({message: "Legal business name:"});
 
-    // Legal structure drives which registration number we collect; both map to `crn`
-    // (the backend compares companyType against MerchantBusinessTypeEnum).
+    // Legal structure. The backend MerchantBusinessTypeEnum also has SOLE_TRADER, but product
+    // deliberately restricts CLI signup to Limited Company + Charity — do not re-add sole trader
+    // without product sign-off. Both options carry a registration number stored as `crn` (CRN for
+    // ltd, charity number for charity).
     const companyType = await select({
       message: "Business structure:",
       choices: [
@@ -269,7 +267,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs, signupEmail?
         {name: "Charity", value: "CHARITY"}
       ]
     });
-    // CRNs (e.g. SC123123) and charity numbers are conventionally uppercase; transformer
+    // CRNs (e.g. SC123123) and charity numbers are conventionally uppercase; the transformer
     // capitalises the live echo, toUpperCase guarantees the stored value (transformer is display-only).
     const crn = (
       await input({

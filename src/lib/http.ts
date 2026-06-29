@@ -1,3 +1,5 @@
+/* eslint-disable complexity */
+/* eslint-disable max-lines-per-function */
 import {Agent, fetch as undiciFetch, FormData} from "undici";
 import {randomUUID} from "crypto";
 import {mapHttpResponse, AtoaError} from "./errors";
@@ -20,8 +22,8 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 /**
  * Which credential a request is sent with:
  * - "sdk"  — the long-lived SDK access token passed at client construction
- *            (the default; every pre-BUD-019 call site keeps this behaviour).
- * - "jwt"  — the BUD-019 short-lived JWT from the secrets store; the active business
+ *            (the default; every legacy SDK call site keeps this behaviour).
+ * - "jwt"  — the short-lived JWT from the secrets store; the active business
  *            is carried in the route path (:businessId), never a header.
  * - "none" — no Authorization header (auth exchange/refresh/revoke).
  */
@@ -66,18 +68,19 @@ export interface HttpClient {
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH"]);
 
-// Single-flight latch for the JWT refresh round-trip. Module-level so
-// concurrent 401s within one process share ONE refresh call (the CLI runs one
-// command — and therefore one client — per process). Cleared on settle so a
-// later expiry can refresh again.
-let jwtRefreshInFlight: Promise<void> | null = null;
-
 export function buildHttpClient(opts: {
   baseUrl: string;
   authHeader: string;
   verbose: boolean;
   jwt?: JwtSession;
 }): HttpClient {
+  // Single-flight latch for the JWT refresh round-trip. Per-client (closure-scoped),
+  // not module-level: each client refreshes through its OWN `opts.jwt` seam, so two
+  // clients that 401 concurrently can never coalesce onto each other's refresh and
+  // write tokens through the wrong seam. Cleared on settle so a later expiry refreshes
+  // again. (Also keeps tests isolated — one client's refresh can't leak into another's.)
+  let jwtRefreshInFlight: Promise<void> | null = null;
+
   const agent = new Agent({
     connect: {
       minVersion: "TLSv1.3",
@@ -199,13 +202,19 @@ export function buildHttpClient(opts: {
       data = ct.includes("application/json") ? JSON.parse(raw) : raw;
     }
 
-    // Access tokens last ~1h: a 401 on a JWT request means "expired", so
-    // refresh once and replay. `allowRefresh` is false on the replay itself —
-    // a second 401 surfaces as a plain auth error instead of looping.
+    // Access tokens last ~1h: a 401 on a JWT request means "expired", so refresh once and
+    // replay. `allowRefresh` is false on the replay itself — a second 401 surfaces as a plain
+    // auth error instead of looping.
+    //
+    // CONTRACT — why replaying a write is safe: (1) the backend returns 401 BEFORE running
+    // business logic (auth is rejected pre-processing), so the 401'd attempt had no side effect;
+    // and (2) writes (POST/PUT/PATCH) carry the SAME Idempotency-Key on the replay, so even if
+    // (1) were ever violated the backend dedups the duplicate. DELETE is naturally idempotent.
+    // The only unsafe case is a backend that 401s AFTER a partial mutation AND ignores the
+    // Idempotency-Key — revisit this replay if that ever becomes possible.
     if (response.status === 401 && mode === "jwt" && allowRefresh) {
       await refreshJwtTokens();
-      // Reuse the (possibly auto-generated) Idempotency-Key: the 401'd attempt
-      // was rejected before processing, and the replay is the same logical write.
+      // Reuse the (possibly auto-generated) Idempotency-Key — the replay is the same logical write.
       return send({...reqOpts, idempotencyKey}, mode, false);
     }
 

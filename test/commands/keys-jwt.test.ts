@@ -4,7 +4,7 @@ import {join} from "path";
 import {tmpdir} from "os";
 
 /**
- * BUD-019 Task 5: keys create / list / regenerate / revoke.
+ * keys create / list / regenerate / revoke.
  *
  * The CLI is JWT-only — there is no auth-mode guard and no sdk-paste branch.
  * Commands hit /api/v1/api-keys and persist secrets to the key file at
@@ -117,7 +117,7 @@ async function readKeyFile(): Promise<any> {
 beforeEach(async () => {
   mock.reset();
   process.exitCode = 0;
-  home = await fs.mkdtemp(join(tmpdir(), "atoa-keys-bud019-"));
+  home = await fs.mkdtemp(join(tmpdir(), "atoa-keys-"));
   process.env.ATOA_HOME = home;
 });
 
