@@ -7,7 +7,7 @@ import {saveSdkKey} from "../../lib/sdk-key-file";
 
 interface CreateKeyResponse {
   apiSecret?: string;
-  sdkAccessId?: string;
+  id?: string;
 }
 
 type CreateArgs = CommonOptions & {name?: string};
@@ -31,13 +31,13 @@ export default defineCommand({
     if (!name) throw new AtoaError("an API key name is required — pass --name or run in a terminal", "validation");
 
     if (ctx.dryRun) {
-      ctx.print({...V1_ROUTES.apiKeys.create, query: {env}, body: {name}});
+      ctx.print({...V1_ROUTES.apiKeys.create, pathParams: {env}, body: {name}});
       return;
     }
 
     let data: unknown;
     try {
-      const res = await ctx.http.request({...V1_ROUTES.apiKeys.create, query: {env}, body: {name}});
+      const res = await ctx.http.request({...V1_ROUTES.apiKeys.create, pathParams: {env}, body: {name}});
       data = res.data;
     } catch (err) {
       if ((err as AtoaError).kind === "forbidden") {
@@ -57,7 +57,7 @@ export default defineCommand({
 
     const savedTo = await saveSdkKey({
       env,
-      sdkAccessId: row.sdkAccessId ?? null,
+      sdkAccessId: row.id ?? null,
       apiSecret,
       profile: ctx.profileName,
       createdAt: new Date().toISOString()
@@ -66,7 +66,7 @@ export default defineCommand({
     ctx.print({
       name,
       env,
-      sdkAccessId: row.sdkAccessId ?? null,
+      sdkAccessId: row.id ?? null,
       apiSecret,
       savedTo
     });

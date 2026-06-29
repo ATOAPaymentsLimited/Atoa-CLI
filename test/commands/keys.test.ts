@@ -51,8 +51,9 @@ const mock = vi.hoisted(() => {
             query: req.query,
             body: req.body
           });
-          // regenerate endpoint returns a token; revoke returns nothing meaningful
-          if (req.path.includes("regenerate")) {
+          // "regenerate" is now the dashboard's revoke endpoint (rotates the secret); the delete
+          // path has no "/revoke" suffix, so match on it to return the rotated key.
+          if (req.path.includes("/revoke")) {
             return {status: 200, data: regenerateBody, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
@@ -103,12 +104,12 @@ afterEach(async () => {
 });
 
 describe("keys revoke", () => {
-  it("DELETEs /api/v1/api-keys/:keyId for the latest recorded key", async () => {
+  it("DELETEs /api/merchant/:businessId/v1/api-access/:keyId for the latest recorded key", async () => {
     await seedKeyFile([{env: "sandbox", sdkAccessId: "sda_sb", apiSecret: "s", profile: "acme", createdAt: "t"}]);
     await (revoke.run as any)({args: {yes: true}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("DELETE");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys/:keyId");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access/:keyId");
     expect(mock.requests[0].pathParams).toEqual({keyId: "sda_sb"});
   });
 
@@ -142,12 +143,12 @@ describe("keys revoke", () => {
 });
 
 describe("keys regenerate", () => {
-  it("POSTs /api/v1/api-keys/:keyId/regenerate for the latest recorded key", async () => {
+  it("PUTs /api/merchant/:businessId/v1/api-access/:keyId/revoke for the latest recorded key", async () => {
     await seedKeyFile([{env: "sandbox", sdkAccessId: "sda_sb", apiSecret: "s", profile: "acme", createdAt: "t"}]);
     await (regenerate.run as any)({args: {yes: true}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
-    expect(mock.requests[0].method).toBe("POST");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys/:keyId/regenerate");
+    expect(mock.requests[0].method).toBe("PUT");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access/:keyId/revoke");
     expect(mock.requests[0].pathParams).toEqual({keyId: "sda_sb"});
   });
 

@@ -1,48 +1,44 @@
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
 /**
- * atoa signup wizard tests.
+ * atoa signup wizard tests — mirrors the dashboard /registration flow (no /v1 facade).
  *
- * New flow (full run, --from-step 1, TTY, jwt):
- *   GET  /api/user/profile/                     (identity prefill, best-effort; User model)
- *   POST /api/v1/onboarding/step-1              {firstName, lastName}
- *   GET  /api/merchant/business-types/all       (step-2 lookup)
- *   POST /api/v1/onboarding/step-2              {businessType, name/address}
- *   POST /api/v1/onboarding/step-3              (contact) → 400 OTP_VERIFICATION_IS_REQUIRED
- *   POST /api/v1/onboarding/verify-otp          {otp}
- *   GET  /api/v1/onboarding/transaction-ranges  (step-4 lookup)
- *   POST /api/v1/onboarding/step-4              {acceptTerms:true, ...}   (or .../step-4/skip)
- *
- * Covers:
- *   - Happy path POST sequence + businessId persisted after step-1
- *   - Wrong OTP re-prompts then aborts after 3 attempts
- *   - 429 aborts with rate-limit message
- *   - --skip-extras path (step-4/skip)
- *   - --from-step 3 skips steps 1-2
- *   - Non-TTY errors immediately
- *   - sdk-paste mode errors
+ * Full run (--from-step 1, TTY, jwt) HTTP sequence:
+ *   GET  /api/user/profile/                                              (prefill, best-effort)
+ *   Step 1 — business details:
+ *     GET  /api/merchant/business-types/all                             (industry lookup)
+ *     POST /api/business/                                               (createBusiness → {business:{id}})
+ *     PUT  /api/business/:businessId/accept-terms
+ *     PUT  /api/user/profile/notification-options                       {allowMarketingEmails}
+ *     PUT  /api/business/:businessId/communication-preferences/marketing-consent {enabled}
+ *   Step 2 — structure:
+ *     PUT  /api/business/:businessId                                    {businessInfo:{companyType}}
+ *   Step 3 — personal:
+ *     PUT  /api/user/profile                                            {firstName,lastName}
+ *     PUT  /api/user/profile/contact (×2 when OTP)                      {phone...}/{...,otp}
+ *     PUT  /api/business/:businessId                                    {businessInfo:{address...}}
+ *   Step 4 — extras:
+ *     GET  /api/merchant/average-transaction/ranges
+ *     GET  /api/signup-source/all
+ *     PUT  /api/business/:businessId                                    {businessInfo:{avg...}, sourceOfInstall}
  */
 
 const mock = vi.hoisted(() => {
   const requests: Array<{method: string; path: string; auth?: string; body?: any}> = [];
   let printed: unknown = undefined;
-  let authMode: "jwt" | "sdk-paste" = "jwt";
   let setBusinessIdCalls: Array<{profileName: string; businessId: string}> = [];
   let activeBusinessId: string | undefined = undefined;
 
-  // Tracks how step-3 + verify-otp behave:
-  //   "ok"        → step-3 returns 200 (contact unchanged, no OTP)
-  //   "otp"       → step-3 throws 400 OTP_VERIFICATION_IS_REQUIRED, verify-otp succeeds
-  //   "badOtp"    → step-3 throws 400 OTP_VERIFICATION_IS_REQUIRED, verify-otp always 400
-  //   "rateLimit" → step-3 throws 400 OTP_VERIFICATION_IS_REQUIRED, verify-otp throws 429
+  // contact (PUT /user/profile/contact) OTP behaviour:
+  //   "ok"        → first attempt 200 (no OTP)
+  //   "otp"       → first attempt 400 OTP_VERIFICATION_IS_REQUIRED, OTP resubmit succeeds
+  //   "badOtp"    → first 400 OTP_REQUIRED, every OTP resubmit 400
+  //   "rateLimit" → first 400 OTP_REQUIRED, OTP resubmit 429
   let otpBehaviour: "ok" | "otp" | "badOtp" | "rateLimit" = "otp";
 
   return {
     requests,
     getPrinted: () => printed,
-    setAuthMode(m: "jwt" | "sdk-paste") {
-      authMode = m;
-    },
     setOtpBehaviour(b: "ok" | "otp" | "badOtp" | "rateLimit") {
       otpBehaviour = b;
     },
@@ -53,12 +49,10 @@ const mock = vi.hoisted(() => {
     reset() {
       requests.length = 0;
       printed = undefined;
-      authMode = "jwt";
       otpBehaviour = "otp";
       setBusinessIdCalls = [];
       activeBusinessId = undefined;
     },
-    getAuthMode: async (_p: string, _e: string) => authMode,
     getActiveBusinessId: async (_p: string) => activeBusinessId,
     setActiveBusinessId_fn: async (profileName: string, businessId: string) => {
       setBusinessIdCalls.push({profileName, businessId});
@@ -70,9 +64,9 @@ const mock = vi.hoisted(() => {
         baseUrl: "https://api.atoa.me",
         request: async (req: any) => {
           requests.push({method: req.method, path: req.path, auth: req.auth, body: req.body});
+          const {AtoaError} = await import("../../src/lib/errors");
 
-          if (req.path === "/api/user/profile/") {
-            // Identity prefill is now the User model.
+          if (req.path === "/api/user/profile/" && req.method === "GET") {
             return {
               status: 200,
               data: {
@@ -88,47 +82,53 @@ const mock = vi.hoisted(() => {
           if (req.path === "/api/merchant/business-types/all") {
             return {status: 200, data: [{id: "bt_1", name: "Retail"}], requestId: "r"};
           }
-          if (req.path === "/api/v1/onboarding/transaction-ranges") {
+          if (req.path === "/api/merchant/average-transaction/ranges") {
             return {status: 200, data: ["0-1000", "1000-5000"], requestId: "r"};
           }
-          if (req.path === "/api/v1/onboarding/step-1") {
-            return {status: 200, data: {businessId: "biz_new", nextStep: 2}, requestId: "r"};
+          if (req.path === "/api/signup-source/all") {
+            return {status: 200, data: [{id: "s_1", description: "Twitter"}], requestId: "r"};
           }
-          if (req.path === "/api/v1/businesses/:businessId/onboarding/step-2") {
-            return {status: 200, data: {nextStep: 3}, requestId: "r"};
-          }
-          if (req.path === "/api/v1/onboarding/step-3") {
-            if (otpBehaviour === "ok") {
-              return {status: 200, data: {nextStep: 4}, requestId: "r"};
-            }
-            const {AtoaError} = await import("../../src/lib/errors");
-            throw new AtoaError("OTP required", "validation", {
-              status: 400,
-              errorCode: "OTP_VERIFICATION_IS_REQUIRED",
+          if (req.path === "/api/business/:businessId" && req.method === "GET") {
+            // Resume seed (--from-step >= 2).
+            return {
+              status: 200,
+              data: {
+                business: {
+                  businessInfo: {
+                    legalBusinessName: "Existing Ltd",
+                    tradingName: "Existing",
+                    businessType: {id: "bt_1", name: "Retail"}
+                  }
+                }
+              },
               requestId: "r"
-            });
+            };
           }
-          if (req.path === "/api/v1/onboarding/verify-otp") {
-            if (otpBehaviour === "rateLimit") {
-              const {AtoaError} = await import("../../src/lib/errors");
+          if (req.path === "/api/business/" && req.method === "POST") {
+            return {status: 200, data: {business: {id: "biz_new"}}, requestId: "r"};
+          }
+          if (req.path === "/api/user/profile/contact" && req.method === "PUT") {
+            const hasOtp = req.body && "otp" in req.body;
+            if (!hasOtp) {
+              if (otpBehaviour === "ok") return {status: 200, data: {}, requestId: "r"};
+              throw new AtoaError("OTP required", "validation", {
+                status: 400,
+                errorCode: "OTP_VERIFICATION_IS_REQUIRED",
+                requestId: "r"
+              });
+            }
+            if (otpBehaviour === "rateLimit")
               throw new AtoaError("Too many requests", "rate_limit", {status: 429, requestId: "r"});
-            }
-            if (otpBehaviour === "badOtp") {
-              const {AtoaError} = await import("../../src/lib/errors");
+            if (otpBehaviour === "badOtp")
               throw new AtoaError("Invalid OTP", "validation", {status: 400, requestId: "r"});
-            }
-            return {status: 200, data: {nextStep: 4}, requestId: "r"};
+            return {status: 200, data: {}, requestId: "r"};
           }
-          if (req.path === "/api/v1/businesses/:businessId/onboarding/step-4") {
-            return {status: 200, data: {status: "complete"}, requestId: "r"};
-          }
-          if (req.path === "/api/v1/businesses/:businessId/onboarding/step-4/skip") {
-            return {status: 200, data: {status: "complete"}, requestId: "r"};
-          }
+          // accept-terms, notification-options, marketing-consent, updateProfile, updateBusiness (steps 2-4)
           return {status: 200, data: {}, requestId: "r"};
         }
       },
       format: "json",
+      formatExplicit: true, // deterministic machine-output branch → ctx.print() (not the TTY summary)
       verbose: false,
       dryRun: opts.dryRun ?? false,
       yes: opts.yes ?? false,
@@ -151,11 +151,11 @@ vi.mock("../../src/lib/config-store", async () => {
   const actual = await vi.importActual<any>("../../src/lib/config-store");
   return {
     ...actual,
-    getAuthMode: mock.getAuthMode,
     getActiveBusinessId: mock.getActiveBusinessId,
     setActiveBusinessId: mock.setActiveBusinessId_fn,
-    // ensureSignedUp() resolves an existing session → these short-circuit step-0 so the
-    // tests exercise onboarding (not the OTP-signup path, which has its own coverage).
+    // Profile rename touches the real ~/.atoa store; no-op it so the wizard reaches the summary.
+    renameProfile: async () => {},
+    // ensureSignedUp() resolves an existing session → these short-circuit step-0.
     resolveActiveProfile: async () => ({
       kind: "ok",
       name: "acme",
@@ -177,13 +177,11 @@ vi.mock("../../src/lib/secrets-store", async () => {
   };
 });
 
-// signup's run calls assertTlsHardenedEnv() directly (buildContext is mocked away).
 vi.mock("../../src/lib/http", async () => {
   const actual = await vi.importActual<any>("../../src/lib/http");
   return {...actual, assertTlsHardenedEnv: () => {}};
 });
 
-// Mock @inquirer/prompts — must be hoisted so the factory can reference the fns
 const promptMocks = vi.hoisted(() => ({
   input: vi.fn(),
   confirm: vi.fn(),
@@ -197,38 +195,31 @@ vi.mock("@inquirer/prompts", () => ({
 
 import signup from "../../src/commands/signup";
 
-/** The POST onboarding endpoints, in the order a full run hits them. */
-function postPaths() {
-  return mock.requests.filter((r) => r.method === "POST").map((r) => r.path);
-}
+const paths = () => mock.requests.map((r) => r.path);
+const byPath = (p: string) => mock.requests.filter((r) => r.path === p);
 
-/** Wire up the full-run prompt answers (step1 → step4). */
+/** Full-run prompt answers (from step 1, with phone → OTP). */
 function fullRunPrompts() {
   promptMocks.input.mockReset();
   promptMocks.input
-    .mockResolvedValueOnce("John") // step1 firstName
-    .mockResolvedValueOnce("Doe") // step1 lastName
-    .mockResolvedValueOnce("Acme Ltd") // step2 legalBusinessName
-    .mockResolvedValueOnce("12345678") // step2 CRN / charity number
-    .mockResolvedValueOnce("Acme") // step2 tradingName
-    .mockResolvedValueOnce("1 High St") // step2 addressLine1
-    .mockResolvedValueOnce("") // step2 addressLine2
-    .mockResolvedValueOnce("London") // step2 cityOrTown
-    .mockResolvedValueOnce("EC1A 1BB") // step2 addressPostalCode
-    .mockResolvedValueOnce("john@acme.com") // step3 email
+    .mockResolvedValueOnce("Acme Ltd") // step1 business name
+    .mockResolvedValueOnce("John") // step3 firstName
+    .mockResolvedValueOnce("Doe") // step3 lastName
     .mockResolvedValueOnce("44") // step3 phoneCountryCode
     .mockResolvedValueOnce("7700900001") // step3 phoneNumber
-    .mockResolvedValueOnce("123456") // OTP attempt 1
-    .mockResolvedValue("Twitter"); // step4 sourceOfInstall (+ any extra)
+    .mockResolvedValueOnce("123456") // step3 OTP (withOtp)
+    .mockResolvedValueOnce("1 High St") // step3 business address
+    .mockResolvedValue("EC1A 1BB"); // step3 postcode (+ any extra)
 
   promptMocks.select.mockReset();
   promptMocks.select
-    .mockResolvedValueOnce("bt_1") // step2 businessType (industry)
-    .mockResolvedValueOnce("COMPANY_LTD") // step2 business structure
-    .mockResolvedValueOnce("0-1000"); // step4 transaction range
+    .mockResolvedValueOnce("bt_1") // step1 industry
+    .mockResolvedValueOnce("COMPANY_LTD") // step2 structure
+    .mockResolvedValueOnce("0-1000") // step4 turnover
+    .mockResolvedValue("Twitter"); // step4 source
 
   promptMocks.confirm.mockReset();
-  promptMocks.confirm.mockResolvedValue(true); // T&C
+  promptMocks.confirm.mockResolvedValue(true); // privacy, terms, marketing
 }
 
 beforeEach(() => {
@@ -239,117 +230,147 @@ beforeEach(() => {
 });
 
 describe("signup — happy path (full wizard)", () => {
-  it("POSTs the onboarding steps in the correct order", async () => {
+  it("hits the onboarding endpoints in the correct order", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
 
-    expect(postPaths()).toEqual([
-      "/api/v1/onboarding/step-1",
-      "/api/v1/businesses/:businessId/onboarding/step-2",
-      "/api/v1/onboarding/step-3",
-      "/api/v1/onboarding/verify-otp",
-      "/api/v1/businesses/:businessId/onboarding/step-4"
+    expect(paths()).toEqual([
+      "/api/user/profile/", // prefill
+      "/api/merchant/business-types/all", // step1 industry
+      "/api/business/", // step1 createBusiness
+      "/api/business/:businessId/accept-terms", // step1 consent
+      "/api/user/profile/notification-options", // step1 marketing (user)
+      "/api/business/:businessId/communication-preferences/marketing-consent", // step1 marketing (business)
+      "/api/business/:businessId", // step2 structure
+      "/api/user/profile", // step3 name
+      "/api/user/profile/contact", // step3 phone (OTP send)
+      "/api/user/profile/contact", // step3 phone (OTP verify)
+      "/api/business/:businessId", // step3 address
+      "/api/merchant/average-transaction/ranges", // step4 lookup
+      "/api/signup-source/all", // step4 lookup
+      "/api/business/:businessId" // step4 extras
     ]);
   });
 
-  it("prefills via GET /api/user/profile/ and looks up business-types + transaction-ranges", async () => {
+  it("creates the business with the chosen name + industry (flat body)", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-    const gets = mock.requests.filter((r) => r.method === "GET").map((r) => r.path);
-    expect(gets).toContain("/api/user/profile/");
-    expect(gets).toContain("/api/merchant/business-types/all");
-    expect(gets).toContain("/api/v1/onboarding/transaction-ranges");
+    const create = byPath("/api/business/").find((r) => r.method === "POST");
+    expect(create?.body).toMatchObject({
+      legalBusinessName: "Acme Ltd",
+      tradingName: "Acme Ltd",
+      businessType: {id: "bt_1", name: "Retail"}
+    });
   });
 
-  it("sends the selected businessType in the step-2 body", async () => {
+  it("records consent: accept-terms + marketing (user + business)", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-    const step2 = mock.requests.find((r) => r.path === "/api/v1/businesses/:businessId/onboarding/step-2");
-    expect(step2?.body?.businessType).toEqual({id: "bt_1", name: "Retail"});
+    expect(byPath("/api/business/:businessId/accept-terms")).toHaveLength(1);
+    expect(byPath("/api/user/profile/notification-options")[0]?.body).toEqual({allowMarketingEmails: true});
+    expect(byPath("/api/business/:businessId/communication-preferences/marketing-consent")[0]?.body).toEqual({
+      enabled: true
+    });
   });
 
-  it("sends companyType (legal structure) and crn in the step-2 body", async () => {
+  it("sends companyType nested under businessInfo in step 2", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-    const step2 = mock.requests.find((r) => r.path === "/api/v1/businesses/:businessId/onboarding/step-2");
-    expect(step2?.body?.companyType).toBe("COMPANY_LTD");
-    expect(step2?.body?.crn).toBe("12345678");
+    const updates = byPath("/api/business/:businessId").filter((r) => r.method === "PUT");
+    const step2 = updates.find((r) => r.body?.businessInfo?.companyType);
+    expect(step2?.body?.businessInfo).toMatchObject({
+      companyType: "COMPANY_LTD",
+      legalBusinessName: "Acme Ltd",
+      businessType: {id: "bt_1"}
+    });
   });
 
-  it("sends acceptTerms and the chosen transaction range in the step-4 body", async () => {
+  it("sends name to /user/profile and address (nested) in step 3", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-    const step4 = mock.requests.find((r) => r.path === "/api/v1/businesses/:businessId/onboarding/step-4");
-    expect(step4?.body).toMatchObject({acceptTerms: true, averageMonthlyTransaction: "0-1000"});
+    expect(byPath("/api/user/profile").find((r) => r.method === "PUT")?.body).toEqual({
+      firstName: "John",
+      lastName: "Doe"
+    });
+    const addr = byPath("/api/business/:businessId").find((r) => r.body?.businessInfo?.addressLine1);
+    expect(addr?.body?.businessInfo).toMatchObject({addressLine1: "1 High St", addressPostalCode: "EC1A 1BB"});
   });
 
-  it("persists businessId after step-1 before continuing", async () => {
+  it("sends turnover + sourceOfInstall in step 4 (full businessInfo resent)", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
+    const extras = byPath("/api/business/:businessId").find((r) => r.body?.sourceOfInstall);
+    expect(extras?.body?.sourceOfInstall).toBe("Twitter");
+    expect(extras?.body?.businessInfo).toMatchObject({
+      averageMonthlyTransaction: "0-1000",
+      companyType: "COMPANY_LTD",
+      legalBusinessName: "Acme Ltd"
+    });
+  });
 
+  it("persists businessId immediately after createBusiness", async () => {
+    await (signup.run as any)({args: {}, rawArgs: []});
     const calls = mock.getSetBusinessIdCalls();
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({profileName: "acme", businessId: "biz_new"});
+    expect(calls).toEqual([{profileName: "acme", businessId: "biz_new"}]);
 
-    const step1Idx = mock.requests.findIndex((r) => r.path === "/api/v1/onboarding/step-1");
-    const step2Idx = mock.requests.findIndex((r) => r.path === "/api/v1/businesses/:businessId/onboarding/step-2");
-    expect(step1Idx).toBeLessThan(step2Idx);
+    const createIdx = mock.requests.findIndex((r) => r.path === "/api/business/" && r.method === "POST");
+    const step2Idx = mock.requests.findIndex((r) => r.path === "/api/business/:businessId" && r.method === "PUT");
+    expect(createIdx).toBeLessThan(step2Idx);
   });
 
-  it("sends OTP in verify-otp body", async () => {
+  it("sends the OTP on the contact verify resubmit", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-
-    const otpReq = mock.requests.find((r) => r.path === "/api/v1/onboarding/verify-otp");
-    expect(otpReq?.body?.otp).toBe("123456");
+    const contact = byPath("/api/user/profile/contact");
+    expect(contact).toHaveLength(2);
+    expect(contact[1]?.body?.otp).toBe("123456");
   });
 
-  it("skips OTP when step-3 succeeds (unchanged contact)", async () => {
+  it("skips OTP when the contact update succeeds outright", async () => {
     mock.setOtpBehaviour("ok");
     await (signup.run as any)({args: {}, rawArgs: []});
-
-    const paths = mock.requests.map((r) => r.path);
-    expect(paths).toContain("/api/v1/onboarding/step-3");
-    expect(paths).not.toContain("/api/v1/onboarding/verify-otp");
+    expect(byPath("/api/user/profile/contact")).toHaveLength(1);
   });
 
   it("prints a completion summary", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-    const printed = mock.getPrinted() as any;
-    expect(printed).toMatchObject({status: "complete"});
+    expect(mock.getPrinted()).toMatchObject({status: "complete"});
   });
 });
 
 describe("signup — --skip-extras", () => {
-  it("calls step-4/skip and skips step-4 (no transaction-ranges lookup)", async () => {
+  it("skips the step-4 lookups and the extras update", async () => {
     await (signup.run as any)({args: {skipExtras: true}, rawArgs: []});
-
-    const paths = mock.requests.map((r) => r.path);
-    expect(paths).toContain("/api/v1/businesses/:businessId/onboarding/step-4/skip");
-    expect(paths).not.toContain("/api/v1/businesses/:businessId/onboarding/step-4");
-    expect(paths).not.toContain("/api/v1/onboarding/transaction-ranges");
+    expect(paths()).not.toContain("/api/merchant/average-transaction/ranges");
+    expect(paths()).not.toContain("/api/signup-source/all");
+    // step-4 extras PUT (the one carrying sourceOfInstall) must not happen.
+    expect(byPath("/api/business/:businessId").some((r) => r.body?.sourceOfInstall)).toBe(false);
   });
 });
 
 describe("signup — --from-step 3", () => {
   beforeEach(() => {
     mock.setActiveBusinessId("biz_existing");
-
     promptMocks.input.mockReset();
     promptMocks.input
-      .mockResolvedValueOnce("john@acme.com") // email
+      .mockResolvedValueOnce("John") // firstName
+      .mockResolvedValueOnce("Doe") // lastName
       .mockResolvedValueOnce("44") // phoneCountryCode
       .mockResolvedValueOnce("7700900001") // phoneNumber
       .mockResolvedValueOnce("654321") // OTP
-      .mockResolvedValue("Twitter"); // step4 sourceOfInstall
-
+      .mockResolvedValueOnce("1 High St") // business address
+      .mockResolvedValue("EC1A 1BB"); // postcode
     promptMocks.select.mockReset();
-    promptMocks.select.mockResolvedValue("0-1000"); // transaction range
+    promptMocks.select.mockResolvedValueOnce("0-1000").mockResolvedValue("Twitter");
     promptMocks.confirm.mockReset();
-    promptMocks.confirm.mockResolvedValue(true); // T&C
+    promptMocks.confirm.mockResolvedValue(true);
   });
 
-  it("skips step-1 and step-2 requests", async () => {
+  it("seeds from GET business, skips create + structure, runs personal + extras", async () => {
     await (signup.run as any)({args: {fromStep: "3"}, rawArgs: []});
-
-    const paths = mock.requests.map((r) => r.path);
-    expect(paths).not.toContain("/api/v1/onboarding/step-1");
-    expect(paths).not.toContain("/api/v1/businesses/:businessId/onboarding/step-2");
-    expect(paths).toContain("/api/v1/onboarding/step-3");
-    expect(paths).toContain("/api/v1/onboarding/verify-otp");
+    const p = paths();
+    expect(p).toContain("/api/business/:businessId"); // GET seed + PUTs
+    expect(mock.requests.some((r) => r.path === "/api/business/" && r.method === "POST")).toBe(false); // no create
+    expect(p).toContain("/api/user/profile"); // step3 name
+    expect(p).toContain("/api/user/profile/contact"); // step3 phone
+    // address PUT carries the seeded businessType (so the backend replace keeps it)
+    const addr = byPath("/api/business/:businessId").find(
+      (r) => r.method === "PUT" && r.body?.businessInfo?.addressLine1
+    );
+    expect(addr?.body?.businessInfo?.businessType).toEqual({id: "bt_1", name: "Retail"});
   });
 
   it("errors when --from-step >= 2 and no activeBusinessId", async () => {
@@ -357,8 +378,7 @@ describe("signup — --from-step 3", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (signup.run as any)({args: {fromStep: "3"}, rawArgs: []});
     expect(process.exitCode).toBe(3);
-    const errOut = stderr.mock.calls.map((c) => String(c[0])).join("");
-    expect(errOut).toMatch(/business/i);
+    expect(stderr.mock.calls.map((c) => String(c[0])).join("")).toMatch(/business/i);
     stderr.mockRestore();
   });
 });
@@ -366,26 +386,18 @@ describe("signup — --from-step 3", () => {
 describe("signup — wrong OTP re-prompts then aborts", () => {
   beforeEach(() => {
     mock.setOtpBehaviour("badOtp");
-    fullRunPrompts();
-    // Override OTP answers: 3 wrong attempts
     promptMocks.input.mockReset();
     promptMocks.input
-      .mockResolvedValueOnce("John")
-      .mockResolvedValueOnce("Doe")
-      .mockResolvedValueOnce("Acme Ltd")
-      .mockResolvedValueOnce("Acme")
-      .mockResolvedValueOnce("1 High St")
-      .mockResolvedValueOnce("")
-      .mockResolvedValueOnce("London")
-      .mockResolvedValueOnce("EC1A 1BB")
-      .mockResolvedValueOnce("john@acme.com")
-      .mockResolvedValueOnce("44")
-      .mockResolvedValueOnce("7700900001")
+      .mockResolvedValueOnce("Acme Ltd") // step1 name
+      .mockResolvedValueOnce("John") // firstName
+      .mockResolvedValueOnce("Doe") // lastName
+      .mockResolvedValueOnce("44") // phoneCountryCode
+      .mockResolvedValueOnce("7700900001") // phoneNumber
       .mockResolvedValueOnce("wrong1") // OTP attempt 1
       .mockResolvedValueOnce("wrong2") // OTP attempt 2
-      .mockResolvedValueOnce("wrong3"); // OTP attempt 3
+      .mockResolvedValue("wrong3"); // OTP attempt 3
     promptMocks.select.mockReset();
-    promptMocks.select.mockResolvedValueOnce("bt_1");
+    promptMocks.select.mockResolvedValueOnce("bt_1").mockResolvedValue("COMPANY_LTD");
     promptMocks.confirm.mockReset();
     promptMocks.confirm.mockResolvedValue(true);
   });
@@ -393,15 +405,10 @@ describe("signup — wrong OTP re-prompts then aborts", () => {
   it("re-prompts up to 3 times then exits with validation error", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (signup.run as any)({args: {}, rawArgs: []});
-
     expect(process.exitCode).toBe(3);
-
-    const otpRequests = mock.requests.filter((r) => r.path === "/api/v1/onboarding/verify-otp");
-    expect(otpRequests).toHaveLength(3);
-
-    const errOut = stderr.mock.calls.map((c) => String(c[0])).join("");
-    expect(errOut).toMatch(/[Oo]TP|attempt/i);
-
+    // contact: 1 send + 3 OTP attempts = 4 calls.
+    expect(byPath("/api/user/profile/contact")).toHaveLength(4);
+    expect(stderr.mock.calls.map((c) => String(c[0])).join("")).toMatch(/[Oo]TP|attempt/i);
     stderr.mockRestore();
   });
 });
@@ -409,17 +416,13 @@ describe("signup — wrong OTP re-prompts then aborts", () => {
 describe("signup — 429 rate limit aborts with message", () => {
   beforeEach(() => {
     mock.setOtpBehaviour("rateLimit");
-    fullRunPrompts();
   });
 
   it("aborts with rate-limit exit code (5) and a clear message", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (signup.run as any)({args: {}, rawArgs: []});
-
     expect(process.exitCode).toBe(5);
-    const errOut = stderr.mock.calls.map((c) => String(c[0])).join("");
-    expect(errOut).toMatch(/rate limit|wait/i);
-
+    expect(stderr.mock.calls.map((c) => String(c[0])).join("")).toMatch(/rate limit|wait/i);
     stderr.mockRestore();
   });
 });

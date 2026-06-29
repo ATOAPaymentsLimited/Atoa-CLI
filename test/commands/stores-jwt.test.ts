@@ -64,7 +64,7 @@ const mock = vi.hoisted(() => {
               requestId: "r"
             };
           }
-          if (req.path === "/api/v1/businesses/:businessId/stores/:storeId/bank") {
+          if (req.path === "/api/business/:businessId/stores/:storeId/bank") {
             return {status: 200, data: {id: "st_1", bankAccountId: "ba_1"}, requestId: "r"};
           }
           if (req.path === "/api/payments/stores") {
@@ -148,11 +148,11 @@ describe("stores get — jwt mode", () => {
 // ── stores link-bank ─────────────────────────────────────────────────────────
 
 describe("stores link-bank", () => {
-  it("PUTs /api/v1/stores/:storeId/bank with jwt auth", async () => {
+  it("PUTs /api/business/:businessId/stores/:storeId/bank with jwt auth", async () => {
     await (storesLinkBank.run as any)({args: {storeId: "st_1", bank: "ba_1"}, rawArgs: ["st_1"]});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("PUT");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/stores/:storeId/bank");
+    expect(mock.requests[0].path).toBe("/api/business/:businessId/stores/:storeId/bank");
     expect(mock.requests[0].pathParams).toEqual({storeId: "st_1"});
     expect(mock.requests[0].body).toMatchObject({bankAccountId: "ba_1"});
     expect(mock.requests[0].auth).toBe("jwt");

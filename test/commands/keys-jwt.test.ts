@@ -44,7 +44,7 @@ const mock = vi.hoisted(() => {
       requests.length = 0;
       printed.length = 0;
       activeEnv = "sandbox";
-      createResponse = {apiSecret: "sk_live_new_secret", sdkAccessId: "sda_new"};
+      createResponse = {apiSecret: "sk_live_new_secret", id: "sda_new"};
       listResponse = [{id: "sda_sb", env: "sandbox", createdAt: "2024-01-01"}];
       regenerateResponse = {apiSecret: "sk_regen_secret"};
       forbid = false;
@@ -66,16 +66,16 @@ const mock = vi.hoisted(() => {
             const {AtoaError} = await import("../../src/lib/errors");
             throw new AtoaError("Forbidden", "forbidden", {status: 403, requestId: "r"});
           }
-          if (req.path === "/api/v1/businesses/:businessId/api-keys" && req.method === "POST") {
+          if (req.path === "/api/merchant/:businessId/v1/api-access/:env" && req.method === "POST") {
             return {status: 200, data: createResponse, requestId: "r"};
           }
-          if (req.path === "/api/v1/businesses/:businessId/api-keys" && req.method === "GET") {
+          if (req.path === "/api/merchant/:businessId/v1/api-access" && req.method === "GET") {
             return {status: 200, data: listResponse, requestId: "r"};
           }
-          if (req.path === "/api/v1/businesses/:businessId/api-keys/:keyId/regenerate") {
+          if (req.path === "/api/merchant/:businessId/v1/api-access/:keyId/revoke" && req.method === "PUT") {
             return {status: 200, data: regenerateResponse, requestId: "r"};
           }
-          if (req.path === "/api/v1/businesses/:businessId/api-keys/:keyId" && req.method === "DELETE") {
+          if (req.path === "/api/merchant/:businessId/v1/api-access/:keyId" && req.method === "DELETE") {
             return {status: 200, data: {}, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
@@ -129,13 +129,13 @@ afterEach(async () => {
 // ─── keys create ─────────────────────────────────────────────────────────────
 
 describe("keys create", () => {
-  it("POSTs /api/v1/api-keys with env=sandbox", async () => {
+  it("POSTs /api/merchant/:businessId/v1/api-access/:env with env=sandbox", async () => {
     await (createKey.run as any)({args: {yes: true, name: "Test key"}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("POST");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access/:env");
     expect(mock.requests[0].auth).toBe("jwt");
-    expect(mock.requests[0].query).toEqual({env: "sandbox"});
+    expect(mock.requests[0].pathParams).toEqual({env: "sandbox"});
     expect(mock.requests[0].body).toMatchObject({name: "Test key"});
   });
 
@@ -189,14 +189,14 @@ describe("keys list", () => {
     await (listKeys.run as any)({args: {yes: true}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("GET");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access");
     expect(mock.requests[0].auth).toBe("jwt");
   });
 
   it("prints the rows array (non-TTY) without exposing secrets", async () => {
     mock.setListResponse([{id: "sda_1", env: "sandbox", createdAt: "2024-01-01"}]);
     await (listKeys.run as any)({args: {yes: true}, rawArgs: []});
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access");
     const out = mock.printed[0] as any[];
     expect(out).toEqual([{id: "sda_1", env: "sandbox", createdAt: "2024-01-01"}]);
     expect(JSON.stringify(out)).not.toMatch(/apiSecret/);
@@ -206,12 +206,12 @@ describe("keys list", () => {
 // ─── keys regenerate ─────────────────────────────────────────────────────────
 
 describe("keys regenerate", () => {
-  it("POSTs /api/v1/api-keys/:keyId/regenerate for the latest recorded key", async () => {
+  it("PUTs /api/merchant/:businessId/v1/api-access/:keyId/revoke for the latest recorded key", async () => {
     await seedKeyFile([{env: "sandbox", sdkAccessId: "sda_sb", apiSecret: "s", profile: "acme", createdAt: "t"}]);
     await (regenerate.run as any)({args: {yes: true}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
-    expect(mock.requests[0].method).toBe("POST");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys/:keyId/regenerate");
+    expect(mock.requests[0].method).toBe("PUT");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access/:keyId/revoke");
     expect(mock.requests[0].pathParams).toEqual({keyId: "sda_sb"});
     expect(mock.requests[0].auth).toBe("jwt");
   });
@@ -239,7 +239,7 @@ describe("keys revoke", () => {
     await (revoke.run as any)({args: {yes: true}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("DELETE");
-    expect(mock.requests[0].path).toBe("/api/v1/businesses/:businessId/api-keys/:keyId");
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/v1/api-access/:keyId");
     expect(mock.requests[0].pathParams).toEqual({keyId: "sda_sb"});
     expect(mock.requests[0].auth).toBe("jwt");
   });

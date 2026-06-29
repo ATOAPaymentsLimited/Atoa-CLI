@@ -4,7 +4,7 @@ import {describe, it, expect, vi, beforeEach} from "vitest";
  * sessions list + sessions revoke tests.
  *
  * Verifies:
- *   - sessions list → GET /api/v1/auth/sessions, prints data
+ *   - sessions list → GET /api/user/auth/sessions, prints data
  *   - sessions revoke confirms + calls DELETE + --yes bypass + non-TTY without --yes fails
  */
 
@@ -36,10 +36,10 @@ const mock = vi.hoisted(() => {
         baseUrl: "https://api.atoa.me",
         request: async (req: any) => {
           requests.push({method: req.method, path: req.path, pathParams: req.pathParams, auth: req.auth});
-          if (req.path === "/api/v1/auth/sessions" && req.method === "GET") {
+          if (req.path === "/api/user/auth/sessions" && req.method === "GET") {
             return {status: 200, data: sessionList, requestId: "r"};
           }
-          if (req.path === "/api/v1/auth/sessions/:deviceId" && req.method === "DELETE") {
+          if (req.path === "/api/user/auth/sessions/:deviceId" && req.method === "DELETE") {
             return {status: 200, data: {}, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
@@ -80,11 +80,11 @@ beforeEach(() => {
 });
 
 describe("sessions list", () => {
-  it("GETs /api/v1/auth/sessions with jwt auth", async () => {
+  it("GETs /api/user/auth/sessions with jwt auth", async () => {
     await (sessionsList.run as any)({args: {}, rawArgs: []});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("GET");
-    expect(mock.requests[0].path).toBe("/api/v1/auth/sessions");
+    expect(mock.requests[0].path).toBe("/api/user/auth/sessions");
     expect(mock.requests[0].auth).toBe("jwt");
   });
 
@@ -98,11 +98,11 @@ describe("sessions list", () => {
 });
 
 describe("sessions revoke", () => {
-  it("DELETEs /api/v1/auth/sessions/:deviceId when --yes is set", async () => {
+  it("DELETEs /api/user/auth/sessions/:deviceId when --yes is set", async () => {
     await (sessionsRevoke.run as any)({args: {deviceId: "dev_1", yes: true}, rawArgs: ["dev_1"]});
     expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("DELETE");
-    expect(mock.requests[0].path).toBe("/api/v1/auth/sessions/:deviceId");
+    expect(mock.requests[0].path).toBe("/api/user/auth/sessions/:deviceId");
     expect(mock.requests[0].pathParams).toEqual({deviceId: "dev_1"});
     expect(mock.requests[0].auth).toBe("jwt");
   });
