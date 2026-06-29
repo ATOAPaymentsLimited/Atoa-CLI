@@ -12,7 +12,7 @@ export default defineCommand({
       return;
     }
 
-    // Returns a bare MerchantBankAccountEntity[]; fetchAllPages passes it straight through.
+    // Returns a bare bank-account array; fetchAllPages passes it straight through.
     const rows = await fetchAllPages(ctx, V1_ROUTES.bank.list);
     await presentList(ctx, rows, {
       title: "Bank accounts",

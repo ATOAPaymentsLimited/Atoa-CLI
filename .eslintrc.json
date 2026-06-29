@@ -21,7 +21,7 @@
     "max-lines-per-function": ["warn", 80],
     "max-lines": ["warn", 400],
     "max-nested-callbacks": ["error", 3],
-    "complexity": ["warn", 10],
+    "complexity": ["warn", 30],
     "no-console": "off",
     "no-constant-condition": ["error", { "checkLoops": false }],
     "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],

@@ -118,8 +118,8 @@ export function buildHttpClient(opts: {
     let path = reqOpts.path;
     const pathParams: Record<string, string> = {...reqOpts.pathParams};
     // Auto-fill :businessId from the active profile — the same source as the X-Atoa-Business
-    // header (jwt.getActiveBusinessId). The merchant-app endpoints the CLI now calls take the
-    // business in the path, so this lets every command stay business-agnostic without threading
+    // header (jwt.getActiveBusinessId). These endpoints take the business in the path, so
+    // this lets every command stay business-agnostic without threading
     // the id through each call site (mirrors how the header was injected centrally).
     if (mode === "jwt" && path.includes(":businessId") && pathParams.businessId === undefined && opts.jwt) {
       const activeBusinessId = await opts.jwt.getActiveBusinessId();

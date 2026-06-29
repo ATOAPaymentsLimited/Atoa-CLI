@@ -77,7 +77,7 @@ atoa whoami --env production       # query against a specific env without switch
 atoa login      # opens the Atoa dashboard grant page in your default browser
 ```
 
-`atoa login` takes no `--env`: the browser grant authenticates against a single control-plane
+`atoa login` takes no `--env`: the browser grant authenticates against a single auth
 backend, so the resulting JWT session works for both sandbox and production. The profile is not
 env-scoped.
 
@@ -129,7 +129,7 @@ Credentials live in two owner-only (`0600`) JSON files under `~/.atoa/auth/`:
 
 | File | Content | Keyed by |
 |---|---|---|
-| `session.json` | JWT access + refresh tokens (browser login) | profile only — env-independent, since browser login hits one control-plane backend |
+| `session.json` | JWT access + refresh tokens (browser login) | profile only — env-independent, since browser login hits one auth backend |
 | `secret_key.json` | SDK API keys (`atoa keys create`) | profile + env |
 
 ### Which commands need which login

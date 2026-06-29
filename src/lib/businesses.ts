@@ -1,10 +1,8 @@
 /**
- * Normalises the `/api/business/` (merchant-app) response into the flat shape the CLI
+ * Normalises the `/api/business/` response into the flat shape the CLI
  * commands display. The endpoint returns `{business: BusinessToUser[], requests, metadata}`,
- * where each entry's `.business` is the MerchantEntity. The businessId the CLI binds to is
+ * where each entry's `.business` carries the merchant. The businessId the CLI binds to is
  * the merchant id (`bu.business.id`); the display name lives on the `businessInfo` relation.
- *
- * Replaces the old /v1 BusinessSummaryResponse the facade used to return.
  */
 export interface BusinessSummary {
   id: string;

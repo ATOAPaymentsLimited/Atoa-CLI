@@ -42,7 +42,7 @@ export default defineCommand({
       ctx.print({...V1_ROUTES.payments.links.create, body});
       return;
     }
-    // Response is a ProcessPaymentQrResponse: {qrCodeUrl, paymentUrl, paymentRequestId}.
+    // Response carries {qrCodeUrl, paymentUrl, paymentRequestId}.
     const {data} = await ctx.http.request({...V1_ROUTES.payments.links.create, body});
 
     if (!isInteractive(ctx.formatExplicit)) {

@@ -20,10 +20,9 @@ export default defineCommand({
     }
     const {data} = await ctx.http.request({...V1_ROUTES.stores.get, pathParams: {storeId}});
 
-    // Response is a MerchantStoreEntity (was the old curated StoreResponse). Project
-    // the core fields by their entity names; relation arrays are omitted from the
-    // display. Read defensively since the entity shape is untyped here.
-    const store = (data ?? {}) as MerchantStoreEntity;
+    // Project the core store fields; relation arrays are omitted from the
+    // display. Read defensively since the response shape is untyped here.
+    const store = (data ?? {}) as StoreFields;
     ctx.print({
       id: store.id,
       locationName: store.locationName,
@@ -38,8 +37,8 @@ export default defineCommand({
   })
 });
 
-/** Subset of the backend MerchantStoreEntity this command surfaces. */
-interface MerchantStoreEntity {
+/** Subset of the store fields this command surfaces. */
+interface StoreFields {
   id?: string;
   locationName?: string;
   addressLine1?: string;

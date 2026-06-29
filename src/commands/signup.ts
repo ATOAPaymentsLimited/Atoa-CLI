@@ -132,7 +132,7 @@ async function otpSignup(args: SignupArgs): Promise<string> {
   }
 
   // Sign up — source=CLI + device makes the backend mint a CLI-source, device-keyed token
-  // (UserAuthController.signUp extension) that the /v1 onboarding facade accepts.
+  // that the onboarding API accepts.
   // Per-profile device id (not machine-level): reuse an explicit --profile's stored id, else a
   // fresh one, so each profile gets its own backend session slot (see login.ts for the why).
   const reuseDeviceId = args.profile ? (await readProfile(args.profile))?.clientDeviceId : undefined;

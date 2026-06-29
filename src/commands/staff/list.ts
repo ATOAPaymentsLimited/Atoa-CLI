@@ -11,8 +11,8 @@ export default defineCommand({
       ctx.print({...V1_ROUTES.staff.list});
       return;
     }
-    // Returns Pagination<BusinessToUserEntity>; name/email come from the nested `user`
-    // relation and the role name from the nested `role` relation.
+    // Paginated; name/email come from the nested `user` relation and the role
+    // name from the nested `role` relation.
     const rows = await fetchAllPages(ctx, V1_ROUTES.staff.list);
     await presentList(ctx, rows, {
       title: "Staff",

@@ -61,7 +61,7 @@ async function browserFlow(args: LoginArgs): Promise<void> {
     );
   }
 
-  // Browser (JWT) login authenticates against a single control-plane backend
+  // Browser (JWT) login authenticates against a single auth backend
   // (resolveBaseUrl is env-independent), so there's no sandbox-vs-production choice
   // to make: one session works for both envs. The profile is therefore NOT env-scoped.
   // SDK/data commands pick their env separately (per-env keys in secret_key.json).
@@ -298,7 +298,7 @@ interface ResolvedBusiness {
 }
 
 /**
- * Resolves which business this login binds to. The merchant-app endpoints take the
+ * Resolves which business this login binds to. These endpoints take the
  * business in the URL (no X-Atoa-Business header), so the id comes from the businesses
  * list, not from identity: the grant's businessId wins if present; a single-business
  * account auto-selects; a multi-business account prompts (interactive) or defaults to

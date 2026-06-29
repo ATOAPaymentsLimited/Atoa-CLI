@@ -18,7 +18,7 @@ export interface SecretsStore {
   backend(): "system" | "file";
   /**
    * Store the JWT credential pair for a profile. JWT sessions are env-INDEPENDENT
-   * (the control-plane backend is the same for sandbox/production), so they're keyed
+   * (the auth backend is the same for sandbox/production), so they're keyed
    * by profile only — unlike SDK keys, which are per-env (see sdk-key-file.ts).
    */
   setJwtTokens(profile: string, tokens: JwtTokens): Promise<void>;

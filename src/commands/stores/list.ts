@@ -12,7 +12,7 @@ export default defineCommand({
       return;
     }
 
-    // fetchAllPages unwraps the Pagination<MerchantStoreEntity> envelope and pages through it.
+    // fetchAllPages unwraps the paginated envelope and pages through it.
     const rows = await fetchAllPages(ctx, V1_ROUTES.stores.list);
     await presentList(ctx, rows, {
       title: "Stores",

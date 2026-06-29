@@ -24,7 +24,7 @@ Browser-based JWT login and the v1 account-management command set.
 ### Changed
 
 - **`atoa login` is env-independent** — the `--env` flag has been removed. The browser grant
-  authenticates against a single control-plane backend, so one JWT session per profile works for
+  authenticates against a single auth backend, so one JWT session per profile works for
   both sandbox and production. `defaultEnv` now only decides which env the SDK/data commands target.
 - **`atoa logout` is env-agnostic** — it clears the profile's JWT session wholesale. `--purge-key`
   removes the profile's SDK keys (every env, or one scoped via `--env`).

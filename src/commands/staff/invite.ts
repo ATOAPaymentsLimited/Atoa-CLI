@@ -41,8 +41,8 @@ export default defineCommand({
     const phoneNumber = args.phone?.trim();
     const phoneCountryCode = args.phoneCountryCode?.trim();
 
-    // Backend (CreateUpdateBusinessUserModel) requires at least one of email or a
-    // full phone (country code + number); a bare number is rejected. Fail fast.
+    // Backend requires at least one of email or a full phone (country code +
+    // number); a bare number is rejected. Fail fast.
     if (!email && !(phoneCountryCode && phoneNumber)) {
       throw new AtoaError("provide --email, or both --phone-country-code and --phone", "validation");
     }
