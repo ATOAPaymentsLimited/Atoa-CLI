@@ -121,6 +121,27 @@ describe("atoa reset", () => {
     stdout.mockRestore();
   });
 
+  it("clears a stale lockfile and does not hang on it", async () => {
+    await writeConfig({
+      schemaVersion: 1,
+      activeProfile: "acme",
+      profiles: {
+        acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x", authMode: "jwt"}}}
+      }
+    });
+    await writeSession({"acme:sandbox": {accessToken: "at", refreshToken: "rt"}});
+    // Orphaned lock from a killed process — the exact state that bricked reset.
+    const lockPath = sessionFilePath() + ".lock";
+    await fs.writeFile(lockPath, "999999", {mode: 0o600});
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await (reset.run as any)({args: {yes: true}, rawArgs: []});
+
+    await expect(fs.access(lockPath)).rejects.toThrow();
+    await expect(fs.access(sessionFilePath())).rejects.toThrow();
+    stdout.mockRestore();
+  });
+
   it("handles corrupt config gracefully (still wipes files)", async () => {
     await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
     await fs.writeFile(configFilePath(), "{ definitely not json", {mode: 0o600});

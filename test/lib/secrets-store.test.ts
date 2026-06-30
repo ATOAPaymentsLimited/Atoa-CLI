@@ -260,6 +260,40 @@ describe("concurrent writes (lockfile)", () => {
     await expect(fs.stat(lockPath)).rejects.toMatchObject({code: "ENOENT"});
   });
 
+  it("reclaims an orphaned lock left by a killed process instead of timing out", async () => {
+    const store = await createSecretsStore();
+
+    // Simulate a process that was Ctrl-C'd / crashed mid-hold: a lock file left on
+    // disk, owned by a PID that isn't running, and old enough to be unambiguously
+    // stale. Before stale-lock recovery this hangs ~5s then throws "Timed out
+    // acquiring lock" — and stayed broken until the user manually rm'd the file.
+    const lockPath = sessionFilePath() + ".lock";
+    await fs.mkdir(join(lockPath, ".."), {recursive: true, mode: 0o700});
+    await fs.writeFile(lockPath, "999999", {mode: 0o600});
+    const old = new Date(Date.now() - 60_000);
+    await fs.utimes(lockPath, old, old);
+
+    await store.setJwtTokens("acme", {accessToken: "at", refreshToken: "rt"});
+    expect(await store.getJwtTokens("acme")).toEqual({accessToken: "at", refreshToken: "rt"});
+  });
+
+  it("reclaims a stale lock by age even when the owner PID is alive (the Windows fix)", async () => {
+    const store = await createSecretsStore();
+
+    // The Windows failure: process.kill(pid,0) doesn't reliably report a dead owner, so the
+    // PID fast-path can't reclaim. Simulate the worst case — a LIVE pid (our own) — so only
+    // the time bound can save us. With the old 30s threshold (> the 5s acquire timeout) this
+    // hung and threw; with the 2s bound the orphan is reclaimed promptly.
+    const lockPath = sessionFilePath() + ".lock";
+    await fs.mkdir(join(lockPath, ".."), {recursive: true, mode: 0o700});
+    await fs.writeFile(lockPath, String(process.pid), {mode: 0o600});
+    const old = new Date(Date.now() - 3000); // older than LOCK_STALE_MS
+    await fs.utimes(lockPath, old, old);
+
+    await store.setJwtTokens("acme", {accessToken: "at", refreshToken: "rt"});
+    expect(await store.getJwtTokens("acme")).toEqual({accessToken: "at", refreshToken: "rt"});
+  });
+
   it("releases the lockfile even when the wrapped write throws", async () => {
     const store = await createSecretsStore();
 

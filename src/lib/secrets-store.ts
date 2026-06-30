@@ -126,9 +126,41 @@ async function writeSessionFile(data: SessionFile): Promise<void> {
 // Lockfile around the read-modify-write so two concurrent `atoa login`s don't clobber each other.
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_WAIT_MS = 5000;
+// A lock older than this is treated as orphaned. A legitimate hold is one file read + one
+// write (sub-second, always), so a live holder NEVER sits on the lock for 2s — anything that
+// old was abandoned by a killed/crashed process. This MUST stay well below LOCK_MAX_WAIT_MS,
+// or the reclaim never fires before we give up (the original 30s > 5s bug). The PID probe
+// below is a fast-path on top; it's unreliable on Windows, so this time bound is the real
+// guarantee. ponytail: time + PID staleness, not a proper-lockfile heartbeat — fine for a
+// local single-user CLI; revisit only if these locks ever span machines.
+const LOCK_STALE_MS = 2_000;
 
-function lockFilePath(): string {
+export function lockFilePath(): string {
   return sessionFilePath() + ".lock";
+}
+
+/**
+ * True when the lock was orphaned by a process that's no longer running — Ctrl-C, a
+ * closed terminal (common on Windows), or a crash mid-hold. Without this, one such
+ * orphan bricks every future credential write until the user manually rm's the file.
+ * Reclaims if the recorded owner PID is dead, or (fallback) if the file is impossibly old.
+ */
+async function lockIsStale(lockPath: string): Promise<boolean> {
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await fs.stat(lockPath)).mtimeMs;
+  } catch {
+    return false; // vanished between EEXIST and now — the retry will grab it
+  }
+  if (Date.now() - mtimeMs > LOCK_STALE_MS) return true;
+  try {
+    const pid = parseInt(await fs.readFile(lockPath, "utf8"), 10);
+    if (!Number.isInteger(pid)) return false;
+    process.kill(pid, 0); // signal 0 = existence probe; throws ESRCH if the owner is gone
+    return false; // owner still alive — a real concurrent writer, wait for it
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ESRCH";
+  }
 }
 
 async function acquireLock(): Promise<() => Promise<void>> {
@@ -149,6 +181,11 @@ async function acquireLock(): Promise<() => Promise<void>> {
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Orphaned lock from a killed/crashed process? Reclaim it and retry at once.
+      if (await lockIsStale(lockPath)) {
+        await fs.unlink(lockPath).catch(() => undefined);
+        continue;
+      }
       if (Date.now() - started > LOCK_MAX_WAIT_MS) {
         throw new Error(
           `Timed out acquiring lock on ${lockPath} after ${LOCK_MAX_WAIT_MS}ms. ` +

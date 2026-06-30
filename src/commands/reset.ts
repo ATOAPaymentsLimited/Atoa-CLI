@@ -2,7 +2,7 @@ import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
 import {unlink} from "fs/promises";
 import {configFilePath, readConfig, type EnvState} from "../lib/config-store";
-import {createSecretsStore, sessionFilePath, type SecretsStore} from "../lib/secrets-store";
+import {createSecretsStore, sessionFilePath, lockFilePath, type SecretsStore} from "../lib/secrets-store";
 import {sdkKeyFilePath} from "../lib/sdk-key-file";
 import {buildHttpClient, assertTlsHardenedEnv} from "../lib/http";
 import {resolveBaseUrl} from "../lib/env";
@@ -102,12 +102,10 @@ export default defineCommand({
         revokedCount = results.filter((r) => r.status === "fulfilled" && r.value).length;
       }
 
-      // Clear keychain slots for every profile we know about
-      for (const name of profileNames) {
-        await store.deleteProfile(name);
-      }
-
-      // Wipe the on-disk files
+      // Wipe the on-disk files. The store is file-only, so deleting session.json
+      // wholesale clears every profile's tokens — no need for per-profile,
+      // lock-acquiring deleteProfile calls (which would themselves hang on an
+      // orphaned lock, the very state reset exists to recover from).
       await wipeFiles();
 
       process.stdout.write(
@@ -123,7 +121,9 @@ export default defineCommand({
 });
 
 async function wipeFiles(): Promise<void> {
-  for (const fp of [configFilePath(), sessionFilePath(), sdkKeyFilePath()]) {
+  // Include the lockfile: a stale one left by a killed process is exactly what
+  // reset must be able to clear, so it's deleted directly here rather than acquired.
+  for (const fp of [configFilePath(), sessionFilePath(), lockFilePath(), sdkKeyFilePath()]) {
     await unlink(fp).catch((err: NodeJS.ErrnoException) => {
       if (err.code !== "ENOENT") throw err;
     });
