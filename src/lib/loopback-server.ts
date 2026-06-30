@@ -1,5 +1,6 @@
 import {createServer, type IncomingMessage, type ServerResponse} from "node:http";
 import {URL} from "node:url";
+import {ATOA_LOGO_SVG} from "./atoa-logo";
 
 export interface LoopbackCallbackResult {
   code: string;
@@ -23,11 +24,12 @@ export interface LoopbackServer {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
+
 // Branded callback page shown in the browser after the OAuth grant. FULLY self-contained:
-// no remote fonts, logo, or any other asset — so it renders offline and never beacons the
-// user's IP + login event to a third party (Google Fonts / WordPress CDN). Atoa's palette is
-// inlined: brand #e42646, ink #0d1011, muted #475664, bg #fbfcfc, border #eaeef0; the wordmark
-// is plain text and the font falls back to the system stack.
+// the Atoa brand mark above is an inlined SVG and there are NO remote assets (no fonts, no external
+// images) — so it renders offline and never beacons the user's IP + login event to a third party
+// (Google Fonts / WordPress CDN). Atoa's palette is inlined: brand #e42646, ink #0d1011,
+// muted #475664, bg #fbfcfc, border #eaeef0; the font falls back to the system stack.
 const callbackPage = (opts: {title: string; heading: string; message: string; ok: boolean}): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -44,7 +46,7 @@ const callbackPage = (opts: {title: string; heading: string; message: string; ok
   .card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--border);
     border-radius:16px; padding:40px 32px; text-align:center;
     box-shadow:0 1px 2px rgba(13,16,17,.04), 0 8px 24px rgba(13,16,17,.06); }
-  .brand { margin-bottom:28px; font-size:22px; font-weight:800; letter-spacing:-.02em; color:var(--brand); }
+  .brand { display:block; height:32px; width:auto; margin:0 auto 28px; }
   .icon { width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; }
   .icon.ok { background:#ecfdf3; } .icon.err { background:#fef3f2; }
   h1 { font-size:20px; font-weight:700; margin:0 0 8px; letter-spacing:-.01em; }
@@ -53,7 +55,7 @@ const callbackPage = (opts: {title: string; heading: string; message: string; ok
 </head>
 <body>
   <main class="card">
-    <div class="brand">atoa</div>
+    ${ATOA_LOGO_SVG}
     <div class="icon ${opts.ok ? "ok" : "err"}">
       ${
         opts.ok
