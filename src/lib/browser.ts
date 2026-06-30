@@ -25,20 +25,39 @@ export async function openBrowser(url: string): Promise<boolean> {
   });
 }
 
-function openerFor(platform: NodeJS.Platform, url: string): {command: string; args: string[]} {
+export function openerFor(platform: NodeJS.Platform, url: string): {command: string; args: string[]} {
   switch (platform) {
     case "darwin":
       return {command: "open", args: [url]};
     case "win32":
-      // `start` is a cmd.exe builtin, not an executable — it must run via cmd.
-      // The empty quoted first argument is the window title; without it, start
-      // would treat a quoted URL as the title and open nothing.
-      // The URL itself MUST be quoted: cmd treats `&`/`^`/`%` as special even in
-      // args, and the grant URL always has multiple `&` query params — unquoted it
-      // gets truncated at the first `&` and the login breaks. (PKCE/UUID params
-      // never contain a literal `"`, so wrapping in quotes is safe.)
-      return {command: "cmd", args: ["/c", "start", '""', `"${url}"`]};
+      // Open via PowerShell with a Base64-encoded command — the approach the `open`
+      // package settled on. It sidesteps EVERY Windows quoting hazard at once, because the
+      // only thing on the command line is `-EncodedCommand <base64>`, which contains no shell
+      // metacharacters:
+      //   - cmd's `&` command-separator (the grant URL has several `&` query params),
+      //   - the `cmd /c "…"` quote-stripping rule (4 quotes in `start "" "url"` → cmd strips
+      //     the outer pair and re-breaks it — why a plain `cmd /c start` kept failing),
+      //   - Node's own re-escaping of embedded quotes into `\"…\"`.
+      // -EncodedCommand wants the script as UTF-16LE then Base64. Start-Process opens the URL
+      // in the default browser; single-quoting (with `''` doubling) keeps PowerShell from
+      // touching anything inside the URL.
+      return {
+        command: "powershell",
+        args: [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-EncodedCommand",
+          encodePowerShellCommand(`Start-Process '${url.replace(/'/g, "''")}'`)
+        ]
+      };
     default:
       return {command: "xdg-open", args: [url]};
   }
+}
+
+/** PowerShell `-EncodedCommand` payload: the script as UTF-16LE bytes, Base64-encoded. */
+function encodePowerShellCommand(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
 }
