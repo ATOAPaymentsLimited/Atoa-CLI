@@ -115,7 +115,7 @@ atoa login (browser)
       │
       ├─► JWT access token  ──► account-management commands (v1 API)
       │   JWT refresh token      business, sessions, keys, staff, roles,
-      │                          kyb, payment-links, signup, stores get/link-bank
+      │                          kyb, payment-links, bank, stores get/link-bank/image
       │
       └─► SDK API key (optional, via `atoa keys create`)
               ──► payments/data commands (legacy API)
@@ -136,9 +136,10 @@ Credentials live in two owner-only (`0600`) JSON files under `~/.atoa/auth/`:
 
 | Auth required | Commands |
 |---|---|
-| **JWT (browser login)** | `business list/use`, `sessions list/revoke`, `keys create/list`, `kyb status/link`, `staff list/invite`, `roles list`, `payment-links create`, `stores get/link-bank`, `signup` |
+| **JWT (browser login)** | `business list/use`, `sessions list/revoke`, `keys create/list`, `kyb status/link`, `staff list/invite`, `roles list`, `payment-links create/get/delete`, `bank list/get/add/delete`, `stores get/link-bank/image` |
 | **SDK key** (`atoa keys create`) | `payments *`, `refunds *`, `customers *`, `payment-methods *`, `card-on-file *`, `webhooks *`, `bank-feed *`, `payouts *`, `stores list`, `institutions list` |
 | **Either** | `whoami`, `get`, `post`, `delete`, `keys revoke/regenerate` |
+| **None** (self-authenticating) | `signup` (creates the account + session itself), `completion`, `profile *`, `reset` |
 
 Commands that require JWT will error with a clear message when the active profile has only an SDK key and no JWT session. Run `atoa login` (browser) to gain a JWT session; mint an SDK key with `atoa keys create` when you need the SDK/data commands.
 
@@ -151,7 +152,7 @@ Commands that require JWT will error with a clear message when the active profil
 ```bash
 atoa business list                      # list businesses on this account; marks the active one
 atoa business use <businessId>          # switch the active business for /v1 API calls
-atoa sessions list                      # list active CLI/browser sessions for this account
+atoa sessions list                      # list active CLI sessions for this account
 atoa sessions revoke <deviceId>         # revoke a session (--yes to skip confirmation)
 ```
 
@@ -160,8 +161,8 @@ atoa sessions revoke <deviceId>         # revoke a session (--yes to skip confir
 These extend the existing `keys revoke` / `keys regenerate` commands.
 
 ```bash
-atoa keys create                        # create a new SDK API key (jwt mode; apiSecret shown once)
-atoa keys create --save                 # create and store the key as this profile's SDK token
+atoa keys create                        # create a new SDK API key (jwt mode; prompts for a label)
+atoa keys create --name "CI server"     # label the key non-interactively
 atoa keys list                          # list SDK keys for this account (never shows secrets)
 ```
 
@@ -185,29 +186,46 @@ atoa staff invite … --store <storeId>   # restrict to one or more stores (repe
 atoa roles list                         # list available roles for this business
 ```
 
-### Payment links (`payment-links`)
+### Bank accounts (`bank`)
 
 ```bash
-atoa payment-links create --amount 1050               # amount in pence (e.g. 1050 = £10.50)
-atoa payment-links create --amount 1050 --store <id>  # associate with a store
-atoa payment-links create --amount 1050 --notes "Invoice #42"
+atoa bank list                          # list bank accounts for the active business
+atoa bank add                           # interactive: pick bank, enter details, verify via OTP
+atoa bank add --sortCode 040004 --accountNumber 12345678 \
+  --accountHolderName "Acme Ltd" --setPrimary
+atoa bank get <bankAccountId>           # get a bank account by id
+atoa bank delete <bankAccountId> --yes  # remove a bank account
 ```
 
-### Stores — new subcommands (`stores get`, `stores link-bank`)
+### Payment links (`payment-links`)
+
+`--amount` is in GBP (e.g. `10.50`), not pence. `--store-id` is required.
+
+```bash
+atoa payment-links create --amount 10.50 --store-id <id>                  # create a link
+atoa payment-links create --amount 10.50 --store-id <id> --notes "Inv 42" # notes max 30 chars
+atoa payment-links get <linkId> --store-id <id>                           # fetch a link + status
+atoa payment-links delete <linkId> --store-id <id>                        # delete a link
+```
+
+### Stores — new subcommands (`stores get`, `stores link-bank`, `stores image`)
 
 These extend the existing `stores list` command (which uses the legacy SDK key).
 
 ```bash
 atoa stores get <storeId>               # get a store by ID (jwt mode only)
 atoa stores link-bank <storeId> --bank <bankAccountId>  # link a bank account to a store
+atoa stores image ./logo.png --storeId <storeId>        # upload/replace store logo (PNG/JPG, ≤6MB)
 ```
 
 ### Merchant onboarding (`signup`)
 
+`atoa signup` needs **no prior login** — it creates the account (email + one-time code) and its JWT session, then runs the onboarding wizard.
+
 ```bash
-atoa signup                             # interactive four-step onboarding wizard (requires jwt login)
-atoa signup --from-step 2              # resume from step 2 (businessId must already be set)
-atoa signup --skip-extras              # skip step 4 optional extras and finalise immediately
+atoa signup                             # interactive: email + OTP, then guided onboarding
+atoa signup --from-step 2               # resume from step N (2-4; businessId must already be set)
+atoa signup --skip-extras               # skip the optional final step and finalise immediately
 ```
 
 ---
