@@ -131,9 +131,7 @@ async function otpSignup(args: SignupArgs): Promise<string> {
           continue;
         }
 
-        // Backend's per-attempt message ("N attempts remaining") is contradictory here since
-        // we've just given up — always show our own clean exhaustion message instead.
-        throw new AtoaError("Too many incorrect OTP attempts. Please generate a new OTP.", "validation", {
+        throw new AtoaError(ae.message || "Too many incorrect OTP attempts. Please generate a new OTP.", "validation", {
           status: ae.status,
           requestId: ae.requestId
         });

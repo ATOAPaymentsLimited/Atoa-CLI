@@ -79,7 +79,6 @@ describe("printError", () => {
     printError(new AtoaError("failed", "auth", {status: 401, requestId: "r1"}));
     const out = spy.mock.calls.map((c) => String(c[0])).join("");
     expect(out).toContain("failed");
-    expect(out).toContain("401");
     expect(out).toContain("r1");
     spy.mockRestore();
   });

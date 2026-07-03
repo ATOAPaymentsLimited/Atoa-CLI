@@ -499,20 +499,18 @@ describe("signup — email OTP exhausted (account creation)", () => {
       .mockResolvedValue("333333"); // OTP attempt 3
   });
 
-  it("after 5 wrong codes shows a clean exhaustion message, not the raw backend error", async () => {
+  it("after 5 wrong codes exhausts and surfaces the backend's own message", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (signup.run as any)({args: {}, rawArgs: []});
-    // the backend's per-attempt message legitimately shows while retries remain, but the final
-    // exhaustion block (printError's single write call) is our own clean, actionable message —
-    // not the contradictory backend text.
+    // the backend's message is preferred on exhaustion too — it carries the precise reason
+    // (wrong code / expired / etc), and only falls back to our generic message when absent.
     const finalBlock = String(stderr.mock.calls[stderr.mock.calls.length - 1][0]);
     stderr.mockRestore();
 
     expect(process.exitCode).toBe(3); // validation exit code
     // exactly MAX (5) verify attempts — capped by us, not the backend's looser counter
     expect(emailHttp.requests.filter((r) => r.path === "/api/otp/verify-otp")).toHaveLength(5);
-    expect(finalBlock).toMatch(/Too many incorrect OTP attempts/i);
-    expect(finalBlock).not.toMatch(/Incorrect code used/i);
+    expect(finalBlock).toMatch(/Incorrect code used/i);
     // aborted before creating the account
     expect(emailHttp.requests.some((r) => r.path === "/api/user/auth/sign-up")).toBe(false);
   });

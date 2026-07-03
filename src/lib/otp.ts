@@ -102,9 +102,7 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
         continue;
       }
       if (ae.status === 400) {
-        // Backend's per-attempt message ("N attempts remaining") is contradictory here since
-        // we've just given up — always show our own clean exhaustion message instead.
-        throw new AtoaError("Too many incorrect OTP attempts.", "validation", {
+        throw new AtoaError(ae.message || "Too many incorrect OTP attempts.", "validation", {
           status: ae.status,
           requestId: ae.requestId
         });

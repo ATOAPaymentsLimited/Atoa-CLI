@@ -99,8 +99,6 @@ export function printError(err: unknown, opts?: {authMode?: "jwt" | "sdk"}): voi
     const parts = [`error: ${err.message}`];
     const hint = hintFor(err, opts?.authMode ?? "jwt");
     if (hint) parts[0] += ` — ${hint}`;
-    if (err.status) parts.push(`  status: ${err.status}`);
-    if (err.errorCode) parts.push(`  code: ${err.errorCode}`);
     if (err.requestId) parts.push(`  request-id: ${err.requestId}`);
     process.stderr.write(parts.join("\n") + "\n");
   } else if (err instanceof Error) {
