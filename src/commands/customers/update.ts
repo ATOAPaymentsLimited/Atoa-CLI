@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
+import {withCommonArgs, runProdSdkKey, type CommonOptions} from "../_common";
 
 type UpdateArgs = CommonOptions & {
   id?: string;
@@ -28,7 +28,7 @@ export default defineCommand({
     postcode: {type: "string", description: "postal code"},
     vatNumber: {type: "string", description: "VAT registration number (business customers)"}
   }),
-  run: runWithSdkKey<UpdateArgs>(async (ctx, args) => {
+  run: runProdSdkKey<UpdateArgs>(async (ctx, args) => {
     const body = {
       ...(args.fullName && {fullName: args.fullName}),
       ...(args.email && {email: args.email}),

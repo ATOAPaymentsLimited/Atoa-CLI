@@ -14,7 +14,7 @@ export const V1_ROUTES = {
     exchange: none("POST", "/api/auth/extension-token/exchange"),
     refresh: none("POST", "/api/auth/extension-token/refresh"),
     revoke: none("POST", "/api/auth/extension-token/revoke"),
-    otpSend: none("POST", "/api/otp/send"),
+    otpSend: none("POST", "/api/otp/send-otp"),
     otpVerify: none("POST", "/api/otp/verify-otp"),
     signUp: none("POST", "/api/user/auth/sign-up")
   },
@@ -79,7 +79,9 @@ export const V1_ROUTES = {
   },
   payments: {
     links: {
-      create: jwt("POST", "/api/payments/:businessId/generate-payment-link")
+      create: jwt("POST", "/api/business/:businessId/links/payment/store/:storeId"),
+      get: jwt("GET", "/api/business/:businessId/links/payment/store/:storeId/link/:linkId"),
+      delete: jwt("DELETE", "/api/business/:businessId/links/payment/store/:storeId/link/:linkId")
     }
   }
 } as const;

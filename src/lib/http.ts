@@ -6,6 +6,7 @@ import {mapHttpResponse, AtoaError} from "./errors";
 import {redactAuthHeader} from "./auth";
 import {V1_ROUTES} from "./v1-routes";
 import type {JwtTokens} from "./secrets-store";
+import {lockLog} from "./secrets-store";
 import packageJson from "../../package.json";
 
 export {assertTlsHardenedEnv} from "./bootstrap";
@@ -276,6 +277,7 @@ export function buildHttpClient(opts: {
         requestId: refreshed.requestId
       });
     }
+    lockLog("http: 401 refresh succeeded — persisting rotated tokens (this write creates session.lock)");
     await jwt.setTokens({accessToken: d.accessToken, refreshToken: d.refreshToken});
   }
 

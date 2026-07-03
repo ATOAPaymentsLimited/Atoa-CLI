@@ -22,7 +22,7 @@ export interface WithOtpOptions {
   body: Record<string, unknown>;
   /** Path params applied to both calls. */
   pathParams?: Record<string, string>;
-  /** Max OTP entry attempts. Default 3. */
+  /** Max OTP entry attempts. Default 5 (matches the backend's OTP_MAX_WRONG_ATTEMPTS). */
   maxAttempts?: number;
   /** OTP prompt (overridable for tests). Default: @inquirer input. */
   promptOtp?: (message: string) => Promise<string>;
@@ -46,7 +46,7 @@ export interface WithOtpOptions {
  */
 export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{data: unknown; otpUsed: boolean}> {
   const verifyRoute = opts.verify ?? opts.send;
-  const maxAttempts = opts.maxAttempts ?? 3;
+  const maxAttempts = opts.maxAttempts ?? 5;
   const promptOtp = opts.promptOtp ?? ((message: string) => input({message}));
 
   // First attempt — no otp. Succeeds outright when the backend doesn't require one.
@@ -95,12 +95,15 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
           return {data: res.data, otpUsed: true};
         }
       }
-      // 400 = wrong/expired OTP — retry while attempts remain, otherwise give up.
+      // 400 = wrong/expired OTP — retry while attempts remain, otherwise give up. The backend
+      // supplies the precise reason + remaining count (wrong code / expired / N left), so surface it.
       if (ae.status === 400 && attempt < maxAttempts) {
-        process.stderr.write(`Invalid OTP. ${maxAttempts - attempt} attempt(s) remaining.\n`);
+        process.stderr.write(`${ae.message}\n`);
         continue;
       }
       if (ae.status === 400) {
+        // Backend's per-attempt message ("N attempts remaining") is contradictory here since
+        // we've just given up — always show our own clean exhaustion message instead.
         throw new AtoaError("Too many incorrect OTP attempts.", "validation", {
           status: ae.status,
           requestId: ae.requestId

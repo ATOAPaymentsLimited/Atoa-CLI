@@ -58,6 +58,12 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
   const b = (body ?? {}) as Record<string, unknown>;
   const raw = (b["message"] ?? b["error"] ?? `HTTP ${status}`) as string;
   const message = typeof raw === "string" ? raw.slice(0, 200) : `HTTP ${status}`;
+  // OTP throttling arrives with a 401/403 status even though it's really a "slow down" error
+  // (e.g. "…maximum number of OTP requests…"). Reclassify by message so we neither tell the user
+  // to re-authenticate nor exit with the auth code — it's a rate limit, cleared by waiting.
+  if (/maximum number of otp requests|too many otp requests/i.test(message)) {
+    kind = "rate_limit";
+  }
   // Prefer an explicit errorCode; fall back to the backend's `name` field, which carries a
   // stable SCREAMING_SNAKE code (e.g. OTP_VERIFICATION_IS_REQUIRED) used to branch control flow.
   const codeRaw =

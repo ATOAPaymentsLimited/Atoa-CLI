@@ -72,14 +72,22 @@ async function readSessionFile(): Promise<SessionFile> {
 }
 
 /**
- * icacls argv that locks `dir` to `user` only: `/inheritance:r` strips inherited
- * ACEs, `/grant:r user:(OI)(CI)F` grants the user full control and makes the ACE
- * inheritable to files (OI) and subdirs (CI) so the credential files created inside
- * are owner-only too; `/T` reapplies to anything already there, `/C /Q` continue
- * quietly. Pure so it can be unit-tested without spawning.
+ * icacls argv that locks `dir` to `user` only: `/inheritance:r` strips ACEs inherited
+ * from the parent, `/grant:r user:(OI)(CI)F` makes the user the sole grantee with full
+ * control, inheritable to files (OI) and subdirs (CI) so credential files created inside
+ * are owner-only too; `/C /Q` continue quietly. Pure so it can be unit-tested.
+ *
+ * Deliberately NO `/T`. Recursing the grant onto EXISTING leaf files reapplied the
+ * (OI)(CI) inheritance flags to them — meaningless on a leaf, so paired with
+ * `/inheritance:r` (which strips the file's real inherited ACE) it left the file with an
+ * EMPTY effective DACL: access denied to everyone, including the owner. That poisoned the
+ * live session.json.lock this same dir holds — `release`'s unlink then failed EPERM and
+ * every later command hung 5s unable to stat or reclaim the orphan (Windows-only). The dir
+ * lockdown alone secures the tree (other accounts can't even traverse in) and new children
+ * inherit owner-only via the (OI)(CI) ACE, so `/T` was redundant AND harmful.
  */
 export function windowsLockdownArgs(dir: string, user: string): string[] {
-  return [dir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`, "/T", "/C", "/Q"];
+  return [dir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`, "/C", "/Q"];
 }
 
 /**
@@ -135,6 +143,16 @@ const LOCK_MAX_WAIT_MS = 5000;
 // local single-user CLI; revisit only if these locks ever span machines.
 const LOCK_STALE_MS = 2_000;
 
+// ponytail: gated stderr tracer for the lock lifecycle — no logging framework, no deps.
+// Enable with ATOA_LOCK_DEBUG=1 to see who creates/reclaims/releases session.lock, from which
+// pid, and when. The ISO timestamp + pid let you line up logs from two terminals side by side.
+// Exported so the http refresh path can log through the same format. Remove once the lock
+// question is settled.
+export function lockLog(msg: string): void {
+  if (!process.env.ATOA_LOCK_DEBUG) return;
+  process.stderr.write(`[lock pid=${process.pid} ${new Date().toISOString()}] ${msg}\n`);
+}
+
 export function lockFilePath(): string {
   return sessionFilePath() + ".lock";
 }
@@ -149,44 +167,93 @@ async function lockIsStale(lockPath: string): Promise<boolean> {
   let mtimeMs: number;
   try {
     mtimeMs = (await fs.stat(lockPath)).mtimeMs;
-  } catch {
-    return false; // vanished between EEXIST and now — the retry will grab it
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // ENOENT is the benign POSIX race: the lock genuinely vanished between our EEXIST and this
+    // stat, so the next open() grabs it — keep waiting. ANY OTHER code (EBUSY sharing violation,
+    // EPERM/EACCES ACL, or an IO error from a OneDrive/reparse placeholder) means the file EXISTS
+    // — open() just told us EEXIST — but its metadata is unreadable. Those never "just vanish", so
+    // returning false here livelocks (open=EEXIST forever, stat=throw forever) to the 5s timeout.
+    // Our own lock is always statable by others (the handle is closed before the critical section),
+    // so an unstattable lock is never a live holder — treat it as reclaimable and delete it.
+    if (code === "ENOENT") {
+      lockLog("stale-check: lock ENOENT — genuinely vanished, retry will grab it");
+      return false;
+    }
+    lockLog(`stale-check: stat FAILED code=${code} but lock EXISTS — treating as stale to force reclaim`);
+    return true;
   }
-  if (Date.now() - mtimeMs > LOCK_STALE_MS) return true;
+  const ageMs = Date.now() - mtimeMs;
+  if (ageMs > LOCK_STALE_MS) {
+    lockLog(`stale-check: age ${ageMs}ms > ${LOCK_STALE_MS}ms — ORPHANED, reclaiming`);
+    return true;
+  }
   try {
-    const pid = parseInt(await fs.readFile(lockPath, "utf8"), 10);
-    if (!Number.isInteger(pid)) return false;
+    const raw = await fs.readFile(lockPath, "utf8");
+    const pid = parseInt(raw, 10);
+    if (!Number.isInteger(pid)) {
+      lockLog(`stale-check: age ${ageMs}ms, no valid pid (${JSON.stringify(raw)}) — treating as held`);
+      return false;
+    }
     process.kill(pid, 0); // signal 0 = existence probe; throws ESRCH if the owner is gone
+    lockLog(`stale-check: age ${ageMs}ms, owner pid=${pid} ALIVE — real holder, waiting`);
     return false; // owner still alive — a real concurrent writer, wait for it
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "ESRCH";
+    const code = (err as NodeJS.ErrnoException).code;
+    const dead = code === "ESRCH";
+    lockLog(
+      `stale-check: age ${ageMs}ms, owner probe -> ${dead ? "DEAD (ESRCH), reclaiming" : `code=${code}, treating as held`}`
+    );
+    return dead;
   }
 }
 
-async function acquireLock(): Promise<() => Promise<void>> {
+async function acquireLock(label: string): Promise<() => Promise<void>> {
   const lockPath = lockFilePath();
   await fs.mkdir(join(lockPath, ".."), {recursive: true, mode: 0o700});
   const started = Date.now();
+  lockLog(`acquire[${label}]: attempting ${lockPath}`);
   for (;;) {
     try {
       const handle = await fs.open(lockPath, "wx", 0o600);
       await handle.writeFile(String(process.pid));
       await handle.close();
+      lockLog(`acquire[${label}]: CREATED (held by pid=${process.pid})`);
       return async () => {
         try {
           await fs.unlink(lockPath);
-        } catch {
-          // already gone — fine
+          lockLog(`release[${label}]: unlinked lock`);
+        } catch (unlinkErr) {
+          // POSIX: already reclaimed — fine. Windows: an open handle (ours, or AV/Search
+          // indexer scanning the freshly-created file) makes unlink EPERM/EBUSY, leaving the
+          // lock on disk. That orphan is exactly what deadlocks the NEXT command.
+          lockLog(
+            `release[${label}]: unlink FAILED code=${(unlinkErr as NodeJS.ErrnoException).code} — lock left on disk`
+          );
         }
       };
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        lockLog(`acquire[${label}]: unexpected error code=${(err as NodeJS.ErrnoException).code}`);
+        throw err;
+      }
       // Orphaned lock from a killed/crashed process? Reclaim it and retry at once.
       if (await lockIsStale(lockPath)) {
-        await fs.unlink(lockPath).catch(() => undefined);
+        try {
+          await fs.unlink(lockPath);
+          lockLog(`acquire[${label}]: reclaimed orphaned lock, retrying`);
+        } catch (reclaimErr) {
+          // If we judged the lock stale but CAN'T delete it (Windows open-handle EPERM/EBUSY),
+          // the loop re-detects it stale and re-fails to delete on every pass — spinning until
+          // the 5s timeout. Previously swallowed silently; logged loudly now so it's visible.
+          lockLog(
+            `acquire[${label}]: reclaim unlink FAILED code=${(reclaimErr as NodeJS.ErrnoException).code} — will spin until timeout`
+          );
+        }
         continue;
       }
       if (Date.now() - started > LOCK_MAX_WAIT_MS) {
+        lockLog(`acquire[${label}]: TIMEOUT after ${Date.now() - started}ms`);
         throw new Error(
           `Timed out acquiring lock on ${lockPath} after ${LOCK_MAX_WAIT_MS}ms. ` +
             `If no other atoa process is running, remove it manually: rm "${lockPath}"`
@@ -197,8 +264,8 @@ async function acquireLock(): Promise<() => Promise<void>> {
   }
 }
 
-async function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const release = await acquireLock();
+async function withLock<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const release = await acquireLock(label);
   try {
     return await fn();
   } finally {
@@ -224,14 +291,14 @@ const fileStore: SecretsStore = {
     /* no-op */
   },
   async deleteProfile(profile) {
-    await withLock(async () => {
+    await withLock("deleteProfile", async () => {
       const data = await readSessionFile();
       delete data.sessions[profile];
       await writeSessionFile(data);
     });
   },
   async setJwtTokens(profile, tokens) {
-    await withLock(async () => {
+    await withLock("setJwtTokens", async () => {
       const data = await readSessionFile();
       data.sessions[profile] = {accessToken: tokens.accessToken, refreshToken: tokens.refreshToken};
       await writeSessionFile(data);
@@ -244,7 +311,7 @@ const fileStore: SecretsStore = {
     return {accessToken: session.accessToken, refreshToken: session.refreshToken};
   },
   async clearJwtTokens(profile) {
-    await withLock(async () => {
+    await withLock("clearJwtTokens", async () => {
       const data = await readSessionFile();
       delete data.sessions[profile];
       await writeSessionFile(data);

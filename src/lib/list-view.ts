@@ -15,7 +15,7 @@ export async function fetchAllPages(
   route: Route,
   baseQuery: Record<string, string> = {}
 ): Promise<unknown[]> {
-  const SIZE = 100;
+  const SIZE = 50;
   const all: unknown[] = [];
   for (let page = 0; page < 1000; page++) {
     const {data} = await ctx.http.request({...route, query: {...baseQuery, page: String(page), size: String(SIZE)}});

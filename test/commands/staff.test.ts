@@ -84,10 +84,10 @@ describe("staff list", () => {
     expect(mock.requests[0].auth).toBe("jwt");
   });
 
-  it("requests page=0,size=100 via fetchAllPages and prints the rows", async () => {
+  it("requests page=0,size=50 via fetchAllPages and prints the rows", async () => {
     await (staffList.run as any)({args: {}, rawArgs: []});
     expect(mock.requests[0].path).toBe("/api/business/:businessId/users/");
-    expect(mock.requests[0].query).toMatchObject({page: "0", size: "100"});
+    expect(mock.requests[0].query).toMatchObject({page: "0", size: "50"});
     const data = mock.getPrinted() as any[];
     expect(Array.isArray(data)).toBe(true);
     expect(data[0].user.firstName).toBe("Alice");

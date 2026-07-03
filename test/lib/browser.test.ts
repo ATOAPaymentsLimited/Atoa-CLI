@@ -11,7 +11,13 @@ describe("openerFor", () => {
   it("win32: PowerShell -EncodedCommand carries the whole URL intact (no cmd `&`/quote hazards)", () => {
     const {command, args} = openerFor("win32", GRANT_URL);
     expect(command).toBe("powershell");
-    expect(args.slice(0, 5)).toEqual(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"]);
+    expect(args.slice(0, 5)).toEqual([
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand"
+    ]);
 
     // The payload must decode (UTF-16LE) back to a single Start-Process for the full URL —
     // every `&` survives, nothing is truncated or escaped away.

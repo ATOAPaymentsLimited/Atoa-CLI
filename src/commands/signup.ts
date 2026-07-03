@@ -101,7 +101,7 @@ async function otpSignup(args: SignupArgs): Promise<string> {
   process.stderr.write(`An OTP has been sent to ${email}.\n`);
 
   // Verify the OTP → otpVerifiedToken (retry on wrong code).
-  const MAX = 3;
+  const MAX = 5;
   let otpVerifiedToken = "";
   for (let attempt = 1; attempt <= MAX; attempt++) {
     const otp = (await input({message: `OTP (attempt ${attempt}/${MAX}):`})).trim();
@@ -123,10 +123,20 @@ async function otpSignup(args: SignupArgs): Promise<string> {
           }
         );
       }
-      // 400 wrong code / 403 invalid-token — retry while attempts remain.
-      if ((ae.status === 400 || ae.status === 403) && attempt < MAX) {
-        process.stderr.write(`Invalid OTP. ${MAX - attempt} attempt(s) remaining.\n`);
-        continue;
+      // 400 wrong code / 403 invalid-token — retry while attempts remain, else give up cleanly.
+      if (ae.status === 400 || ae.status === 403) {
+        if (attempt < MAX) {
+          // Backend supplies the precise reason + remaining count (wrong code / expired / N left).
+          process.stderr.write(`${ae.message}\n`);
+          continue;
+        }
+
+        // Backend's per-attempt message ("N attempts remaining") is contradictory here since
+        // we've just given up — always show our own clean exhaustion message instead.
+        throw new AtoaError("Too many incorrect OTP attempts. Please generate a new OTP.", "validation", {
+          status: ae.status,
+          requestId: ae.requestId
+        });
       }
       throw err;
     }
@@ -254,11 +264,38 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     }
   }
 
+  // Input validators mirror the dashboard's registration field rules.
+  const NAME_RE = /^[a-zA-Z'\s]+$/; // letters, apostrophes and spaces only — no digits or symbols
+  const validateName = (label: string) => (v: string) => {
+    const s = (v ?? "").trim();
+    if (!s) return `${label} cannot be empty`;
+    return NAME_RE.test(s) || "Special characters & numbers are not allowed.";
+  };
+  const validateBusinessName = (v: string) => {
+    const s = (v ?? "").trim();
+    if (!s) return "Business name cannot be empty";
+    return /^[a-zA-Z0-9 ']+$/.test(s) || "No special characters or punctuation, please!";
+  };
+  const validateAddress = (v: string) => (v ?? "").trim().length > 2 || "Please enter a valid address";
+  const validatePostcode = (v: string) => (v ?? "").trim().length > 2 || "Please enter a valid postal code";
+  // Phone is optional; when supplied it must be digits only (country code 1–4 digits).
+  const validateCountryCode = (v: string) => {
+    const s = (v ?? "").trim();
+    if (!s) return true;
+    return /^\d{1,4}$/.test(s) || "Please enter a valid country code (numbers only, e.g. 44).";
+  };
+  const validatePhoneNumber = (v: string) => {
+    const s = (v ?? "").trim();
+    if (!s) return true;
+    if (!/^\d+$/.test(s)) return "Please enter a valid phone number (numbers only).";
+    return s.replace(/^0+/, "").length >= 10 || "Please enter a valid phone number.";
+  };
+
   // ── Step 1: Business details (name, industry, consent) ───────────────────
   if (fromStep <= 1) {
     process.stderr.write("\nStep 1 of 4 — Business details\n");
 
-    const legalBusinessName = await input({message: "Business name:"});
+    const legalBusinessName = await input({message: "Business name:", validate: validateBusinessName});
 
     // Industry / business type is a server-side lookup (env-specific ids); fetch and pick.
     const types = (await ctx.http.request({...V1_ROUTES.onboarding.businessTypes})).data as Array<{
@@ -328,19 +365,29 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
   // ── Step 3: Personal details ─────────────────────────────────────────────
   if (fromStep <= 3) {
     process.stderr.write("\nStep 3 of 4 — Personal details\n");
-    const firstName = await input({message: "First name:", default: prefill.firstName});
-    const lastName = await input({message: "Last name:", default: prefill.lastName});
+    const firstName = await input({
+      message: "First name:",
+      default: prefill.firstName,
+      validate: validateName("First name")
+    });
+    const lastName = await input({
+      message: "Last name:",
+      default: prefill.lastName,
+      validate: validateName("Last name")
+    });
     await ctx.http.request({...V1_ROUTES.onboarding.updateProfile, body: {firstName, lastName}});
 
     // Phone is optional. When supplied, the contact update may require OTP — withOtp handles the
     // "send → prompt → verify" two-step (re-sends the same request with the code).
     const phoneCountryCode = await input({
       message: "Phone country code, e.g. 44 (optional):",
-      default: prefill.phoneCountryCode
+      default: prefill.phoneCountryCode,
+      validate: validateCountryCode
     });
     const phoneNumber = await input({
       message: "Phone number without country code (optional):",
-      default: prefill.phoneNumber
+      default: prefill.phoneNumber,
+      validate: validatePhoneNumber
     });
     if (phoneNumber) {
       const contactBody: Record<string, unknown> = {phoneNumber};
@@ -355,9 +402,9 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     }
 
     // Business address (part of businessInfo — resend the full accumulator).
-    const addressLine1 = await input({message: "Business address:"});
+    const addressLine1 = await input({message: "Business address:", validate: validateAddress});
     const addressPostalCode = (
-      await input({message: "Postal code:", transformer: (v) => v.toUpperCase()})
+      await input({message: "Postal code:", transformer: (v) => v.toUpperCase(), validate: validatePostcode})
     ).toUpperCase();
     businessInfo.addressLine1 = addressLine1;
     businessInfo.addressPostalCode = addressPostalCode;

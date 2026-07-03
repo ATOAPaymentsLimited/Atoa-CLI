@@ -24,7 +24,6 @@ export interface LoopbackServer {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-
 // Branded callback page shown in the browser after the OAuth grant. FULLY self-contained:
 // the Atoa brand mark above is an inlined SVG and there are NO remote assets (no fonts, no external
 // images) — so it renders offline and never beacons the user's IP + login event to a third party

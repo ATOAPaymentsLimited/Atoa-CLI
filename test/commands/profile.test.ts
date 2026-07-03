@@ -47,6 +47,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   delete process.env.ATOA_HOME;
   await fs.rm(scratch, {recursive: true, force: true}).catch(() => undefined);
 });
@@ -77,8 +78,10 @@ describe("profile list", () => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (list.run as any)({args: {}, rawArgs: []});
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/Profiles/);
-    expect(out).toMatch(/\*\s+acme/); // active marker
+    // Default view is now a table (active | name | business columns).
+    expect(out).toMatch(/active/);
+    expect(out).toMatch(/\*/); // active marker
+    expect(out).toMatch(/acme/);
     expect(out).toMatch(/Acme Ltd/);
     // env columns dropped
     expect(out).not.toMatch(/SANDBOX|PRODUCTION|DEFAULT_ENV/);

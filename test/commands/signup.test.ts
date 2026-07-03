@@ -35,6 +35,8 @@ const mock = vi.hoisted(() => {
   //   "badOtp"    → first 400 OTP_REQUIRED, every OTP resubmit 400
   //   "rateLimit" → first 400 OTP_REQUIRED, OTP resubmit 429
   let otpBehaviour: "ok" | "otp" | "badOtp" | "rateLimit" = "otp";
+  // Whether a JWT session already exists → toggles the email-OTP account-creation path (otpSignup).
+  let sessionExists = true;
 
   return {
     requests,
@@ -42,6 +44,10 @@ const mock = vi.hoisted(() => {
     setOtpBehaviour(b: "ok" | "otp" | "badOtp" | "rateLimit") {
       otpBehaviour = b;
     },
+    setSessionExists(b: boolean) {
+      sessionExists = b;
+    },
+    sessionActive: () => sessionExists,
     setActiveBusinessId(id: string | undefined) {
       activeBusinessId = id;
     },
@@ -50,6 +56,7 @@ const mock = vi.hoisted(() => {
       requests.length = 0;
       printed = undefined;
       otpBehaviour = "otp";
+      sessionExists = true;
       setBusinessIdCalls = [];
       activeBusinessId = undefined;
     },
@@ -142,6 +149,43 @@ const mock = vi.hoisted(() => {
   };
 });
 
+// Controllable HTTP client for the EMAIL-OTP account-creation path. otpSignup builds its own
+// client via buildHttpClient (separate from the mocked buildContext), so this drives otp/send,
+// otp/verify-otp and sign-up without real network.
+const emailHttp = vi.hoisted(() => {
+  const requests: Array<{method: string; path: string; body?: any}> = [];
+  let verifyStatus = 0; // 0 = verify succeeds; otherwise throw an AtoaError with this status
+  return {
+    requests,
+    setVerifyStatus(s: number) {
+      verifyStatus = s;
+    },
+    reset() {
+      requests.length = 0;
+      verifyStatus = 0;
+    },
+    client: {
+      baseUrl: "https://api.atoa.me",
+      request: async (req: any) => {
+        requests.push({method: req.method, path: req.path, body: req.body});
+        const {AtoaError} = await import("../../src/lib/errors");
+        if (req.path === "/api/otp/verify-otp" && verifyStatus) {
+          // Mimic the backend's raw error — its looser "attempts remaining" counter is exactly
+          // what must NOT leak to the user on the final attempt.
+          throw new AtoaError("Incorrect code used. 2 attempts remaining", "generic", {
+            status: verifyStatus,
+            requestId: "otp-req"
+          });
+        }
+        if (req.path === "/api/otp/verify-otp") return {status: 200, data: {otpVerifiedToken: "tok"}, requestId: "r"};
+        if (req.path === "/api/user/auth/sign-up")
+          return {status: 200, data: {accessToken: "at", refreshToken: "rt"}, requestId: "r"};
+        return {status: 200, data: {}, requestId: "r"}; // otp/send + anything else
+      }
+    }
+  };
+});
+
 vi.mock("../../src/lib/context", async () => {
   const actual = await vi.importActual<any>("../../src/lib/context");
   return {...actual, buildContext: mock.buildContext};
@@ -170,7 +214,8 @@ vi.mock("../../src/lib/secrets-store", async () => {
   return {
     ...actual,
     createSecretsStore: async () => ({
-      getJwtTokens: async () => ({accessToken: "a", refreshToken: "r"}),
+      // sessionActive() === false simulates a brand-new user → ensureSignedUp runs otpSignup.
+      getJwtTokens: async () => (mock.sessionActive() ? {accessToken: "a", refreshToken: "r"} : null),
       setJwtTokens: async () => {},
       clearJwtTokens: async () => {}
     })
@@ -179,7 +224,9 @@ vi.mock("../../src/lib/secrets-store", async () => {
 
 vi.mock("../../src/lib/http", async () => {
   const actual = await vi.importActual<any>("../../src/lib/http");
-  return {...actual, assertTlsHardenedEnv: () => {}};
+  // buildHttpClient is used directly only by otpSignup (email-OTP path); buildContext is mocked
+  // separately with its own http, so this override is scoped to account creation.
+  return {...actual, assertTlsHardenedEnv: () => {}, buildHttpClient: () => emailHttp.client};
 });
 
 const promptMocks = vi.hoisted(() => ({
@@ -224,6 +271,7 @@ function fullRunPrompts() {
 
 beforeEach(() => {
   mock.reset();
+  emailHttp.reset();
   process.exitCode = 0;
   (process.stdin as any).isTTY = true;
   fullRunPrompts();
@@ -402,12 +450,12 @@ describe("signup — wrong OTP re-prompts then aborts", () => {
     promptMocks.confirm.mockResolvedValue(true);
   });
 
-  it("re-prompts up to 3 times then exits with validation error", async () => {
+  it("re-prompts up to 5 times then exits with validation error", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (signup.run as any)({args: {}, rawArgs: []});
     expect(process.exitCode).toBe(3);
-    // contact: 1 send + 3 OTP attempts = 4 calls.
-    expect(byPath("/api/user/profile/contact")).toHaveLength(4);
+    // contact: 1 send + 5 OTP attempts = 6 calls.
+    expect(byPath("/api/user/profile/contact")).toHaveLength(6);
     expect(stderr.mock.calls.map((c) => String(c[0])).join("")).toMatch(/[Oo]TP|attempt/i);
     stderr.mockRestore();
   });
@@ -436,5 +484,36 @@ describe("signup — non-TTY", () => {
     expect(mock.requests).toHaveLength(0);
     stderr.mockRestore();
     (process.stdin as any).isTTY = true;
+  });
+});
+
+describe("signup — email OTP exhausted (account creation)", () => {
+  beforeEach(() => {
+    mock.setSessionExists(false); // brand-new user → otpSignup runs the email-OTP loop
+    emailHttp.setVerifyStatus(400); // backend rejects every code
+    promptMocks.input.mockReset();
+    promptMocks.input
+      .mockResolvedValueOnce("new@user.com") // email
+      .mockResolvedValueOnce("111111") // OTP attempt 1
+      .mockResolvedValueOnce("222222") // OTP attempt 2
+      .mockResolvedValue("333333"); // OTP attempt 3
+  });
+
+  it("after 5 wrong codes shows a clean exhaustion message, not the raw backend error", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (signup.run as any)({args: {}, rawArgs: []});
+    // the backend's per-attempt message legitimately shows while retries remain, but the final
+    // exhaustion block (printError's single write call) is our own clean, actionable message —
+    // not the contradictory backend text.
+    const finalBlock = String(stderr.mock.calls[stderr.mock.calls.length - 1][0]);
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(3); // validation exit code
+    // exactly MAX (5) verify attempts — capped by us, not the backend's looser counter
+    expect(emailHttp.requests.filter((r) => r.path === "/api/otp/verify-otp")).toHaveLength(5);
+    expect(finalBlock).toMatch(/Too many incorrect OTP attempts/i);
+    expect(finalBlock).not.toMatch(/Incorrect code used/i);
+    // aborted before creating the account
+    expect(emailHttp.requests.some((r) => r.path === "/api/user/auth/sign-up")).toBe(false);
   });
 });

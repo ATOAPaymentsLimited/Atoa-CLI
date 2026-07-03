@@ -130,6 +130,8 @@ describe("windowsLockdownArgs (Windows ACL hardening)", () => {
     expect(args).toContain("/inheritance:r"); // drop ACEs inherited from the parent dir
     expect(args).toContain("/grant:r"); // replace (not add) — sole grant is the user
     expect(args).toContain("me:(OI)(CI)F"); // full control, inheritable to files (OI) + subdirs (CI)
-    expect(args).toContain("/T"); // reapply to anything already in the dir
+    // NEVER /T: recursing the (OI)(CI) grant onto the live session.json.lock left it an
+    // empty-DACL, access-denied file that hung every later command for 5s on Windows.
+    expect(args).not.toContain("/T");
   });
 });

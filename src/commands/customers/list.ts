@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
+import {withCommonArgs, runProdSdkKey, type CommonOptions} from "../_common";
 import {fetchAllPages, presentList} from "../../lib/list-view";
 
 type ListArgs = CommonOptions & {search?: string};
@@ -11,7 +11,7 @@ export default defineCommand({
   args: withCommonArgs({
     search: {type: "string", description: "name/email search filter"}
   }),
-  run: runWithSdkKey<ListArgs>(async (ctx, args) => {
+  run: runProdSdkKey<ListArgs>(async (ctx, args) => {
     const baseQuery: Record<string, string> = {...(args.search && {search: args.search})};
 
     if (ctx.dryRun) {

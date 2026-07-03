@@ -1,6 +1,6 @@
 {
   "name": "@atoapayments/atoa-cli",
-  "version": "0.2.2",
+  "version": "0.2.7",
   "description": "First-party CLI for the Atoa payment API.",
   "license": "MIT",
   "private": false,

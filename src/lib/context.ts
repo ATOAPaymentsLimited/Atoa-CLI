@@ -86,10 +86,7 @@ export async function buildContext(
   // never stored by the CLI — they live in ~/atoa/auth/secret_key.json for the user/agent.
   const jwt = await store.getJwtTokens(resolved.name);
   if (!jwt) {
-    throw new AtoaError(
-      `No credentials for ${resolved.name}/${env}. Run: atoa login --profile ${resolved.name}`,
-      "auth"
-    );
+    throw new AtoaError(`No credentials for ${resolved.name}. Run: atoa login --profile ${resolved.name}`, "auth");
   }
   const authHeader = "unused";
   const authFingerprint = "";
@@ -128,7 +125,7 @@ export async function buildContext(
 
 /**
  * Guard for the SDK-key commands: returns the stored SDK bearer for `env`. SDK keys must be
- * minted explicitly (`atoa keys create` or `atoa login --provision-key`) so they always carry a
+ * minted explicitly (`atoa keys create`) so they always carry a
  * revocable sdkAccessId. There is deliberately NO paste-and-store fallback — pasting a raw secret
  * would persist an un-revocable plaintext key (no sdkAccessId for `atoa keys revoke` to target).
  * The key is kept ONLY in ~/.atoa/auth/secret_key.json (never the OS keychain).
@@ -138,8 +135,7 @@ export async function ensureSdkKey(env: Env): Promise<string> {
   if (existing) return existing;
 
   throw new AtoaError(
-    `No Atoa API key stored for ${env}. Mint a revocable one with \`atoa keys create --env ${env}\` ` +
-      `or \`atoa login --env ${env} --provision-key\`, then retry.`,
+    `No Atoa API key stored for ${env}. Mint a revocable one with \`atoa keys create --env ${env}\`, then retry.`,
     "auth"
   );
 }
@@ -152,7 +148,7 @@ export async function ensureSdkKey(env: Env): Promise<string> {
 export async function buildSdkContext(opts: CommonOptions): Promise<CommandContext> {
   assertTlsHardenedEnv();
 
-  const env = parseEnvFlag(opts.env ?? "production");
+  const env = parseEnvFlag(opts.env ?? "sandbox");
   const format = resolveFormat(opts.output);
   const formatExplicit = opts.output !== undefined;
   const verbose = opts.verbose ?? false;

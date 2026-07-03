@@ -2,10 +2,11 @@ import type {ArgsDef, CommandContext as CittyContext} from "citty";
 import {buildContext, buildSdkContext, type CommandContext, type CommonOptions} from "../lib/context";
 
 export type {CommonOptions};
-import {exitCodeFor, printError, type AtoaError} from "../lib/errors";
+import {exitCodeFor, printError, AtoaError} from "../lib/errors";
+import {parseEnvFlag} from "../lib/env";
 
 export const COMMON_ARGS = {
-  env: {type: "string" as const, description: "sandbox|production"},
+  env: {type: "string" as const, description: "sandbox|production (SDK-key commands only)"},
   output: {type: "string" as const, description: "json|table|yaml"},
   verbose: {type: "boolean" as const, description: "print redacted request log to stderr"},
   dryRun: {type: "boolean" as const, description: "print resolved request without sending"},
@@ -15,6 +16,14 @@ export const COMMON_ARGS = {
 
 export function withCommonArgs<A extends ArgsDef>(args: A): ArgsDef {
   return {...COMMON_ARGS, ...args} as ArgsDef;
+}
+
+/**
+ * Wrapper for SDK-key commands the backend only serves in production (e.g. customers — there is no
+ * sandbox customer store). Pins the env to production and rejects an explicit non-production --env.
+ */
+export function runProdSdkKey<Args extends CommonOptions>(handler: Handler<Args>) {
+  return runWithSdkKey<Args>(handler, {productionOnly: true});
 }
 
 /**
@@ -58,10 +67,24 @@ export function runWithContext<Args extends CommonOptions>(handler: Handler<Args
  * (no JWT login required). Errors with a "run `atoa keys create`" hint when no SDK key is
  * stored in ~/.atoa/auth/secret_key.json — keys must be minted explicitly so they stay revocable.
  */
-export function runWithSdkKey<Args extends CommonOptions>(handler: Handler<Args>) {
+export function runWithSdkKey<Args extends CommonOptions>(
+  handler: Handler<Args>,
+  sdkOpts?: {productionOnly?: boolean}
+) {
   return async ({args: ctxArgs, rawArgs = []}: CittyContext<ArgsDef>): Promise<void> => {
-    const args = ctxArgs as unknown as Args;
+    let args = ctxArgs as unknown as Args;
     try {
+      // Some SDK endpoints (e.g. customers) exist only in production. Reject an explicit non-production
+      // request with a clear message, and pin the env to production so the production key is loaded.
+      if (sdkOpts?.productionOnly) {
+        if (args.env && parseEnvFlag(args.env) !== "production") {
+          throw new AtoaError(
+            "This command is only available in production. Re-run with --env production.",
+            "validation"
+          );
+        }
+        args = {...args, env: "production"};
+      }
       const ourCtx: CommandContext = await buildSdkContext(args);
       await handler(ourCtx, args, rawArgs);
     } catch (err) {
