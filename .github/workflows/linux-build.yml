@@ -3,12 +3,11 @@ name: Linux Build UAT
 on:
   push:
     branches:
-      - 'hotfix/linux-wf'
+      - 'hotfix/*'
+      - 'release/*'
 
 permissions:
   contents: read
-  id-token: write
-  attestations: write
 
 jobs:
   build-and-sign:
@@ -46,12 +45,15 @@ jobs:
         working-directory: dist
         run: sha256sum atoa-linux-x64 atoa-linux-arm64 > SHA256SUMS
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: |
-            dist/atoa-linux-x64
-            dist/atoa-linux-arm64
+      - name: Import GPG key
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign checksums
+        working-directory: dist
+        run: |
+          gpg --batch --yes \
+            --local-user "${{ secrets.GPG_KEY_ID }}" \
+            --output SHA256SUMS.asc --detach-sign --armor SHA256SUMS
 
       - name: Compute artifact name
         shell: bash
@@ -65,4 +67,5 @@ jobs:
             dist/atoa-linux-x64
             dist/atoa-linux-arm64
             dist/SHA256SUMS
+            dist/SHA256SUMS.asc
           retention-days: 30
