@@ -20,37 +20,31 @@ atoa webhooks trigger PAYMENTS_STATUS       # fire a fake event at your sandbox 
 npm install -g @atoapayments/atoa-cli
 ```
 
-### Linux (standalone binary, no Node.js)
+### Linux & macOS (standalone binary, no Node.js)
 
-One-line install — detects your CPU, verifies the download, and puts `atoa` on your PATH:
+Run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ATOAPaymentsLimited/Atoa-CLI/main/scripts/install.sh | sh
 ```
 
-Pin a version or install location with `ATOA_VERSION` / `ATOA_INSTALL_DIR`:
+The `atoa` CLI is downloaded and added to your PATH. Verify it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ATOAPaymentsLimited/Atoa-CLI/main/scripts/install.sh | ATOA_VERSION=v0.1.1 sh
+atoa --version
 ```
 
-Prefer to download manually? Grab `atoa-linux-x64` (or `atoa-linux-arm64`) from the
-[latest release](https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest) and verify it
-before running:
+### Windows (standalone binary, no Node.js)
 
-```bash
-# in the folder holding the downloaded binary + SHA256SUMS(.asc)
-sha256sum -c SHA256SUMS --ignore-missing        # checksum matches the release
-gpg --verify SHA256SUMS.asc SHA256SUMS          # authenticity (needs Atoa's public key imported)
-chmod +x atoa-linux-x64
-sudo mv atoa-linux-x64 /usr/local/bin/atoa
+Run in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/ATOAPaymentsLimited/Atoa-CLI/main/scripts/install.ps1 | iex
 ```
 
-> The prebuilt binaries are **glibc-only**. On Alpine/musl, use the npm install above instead.
+The `atoa` CLI is downloaded and added to your PATH. Verify it:
 
-Verify any install:
-
-```bash
+```powershell
 atoa --version
 ```
 

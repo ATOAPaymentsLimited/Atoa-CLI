@@ -1,9 +1,9 @@
 #!/bin/sh
-# Atoa CLI installer for Linux.
+# Atoa CLI installer for Linux and macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ATOAPaymentsLimited/Atoa-CLI/main/scripts/install.sh | sh
 #
-# Downloads the standalone `atoa` binary for your CPU from the GitHub Release,
+# Downloads the standalone `atoa` binary for your OS/CPU from the GitHub Release,
 # verifies its checksum (and GPG signature, if our public key is imported), and
 # installs it onto your PATH. No Node.js required.
 #
@@ -23,9 +23,11 @@ err() {
 
 # --- platform detection -----------------------------------------------------
 os="$(uname -s)"
-[ "$os" = "Linux" ] || err "this installer is Linux-only (detected $os).
-  macOS:  brew install atoapayments/tap/atoa
-  other:  npm install -g @atoapayments/atoa-cli"
+case "$os" in
+  Linux)  os_name="linux" ;;
+  Darwin) os_name="darwin" ;;
+  *) err "unsupported OS: $os (Windows: see scripts/install.ps1). Try: npm install -g @atoapayments/atoa-cli" ;;
+esac
 
 case "$(uname -m)" in
   x86_64 | amd64) arch="x64" ;;
@@ -33,10 +35,11 @@ case "$(uname -m)" in
   *) err "unsupported architecture: $(uname -m). Try: npm install -g @atoapayments/atoa-cli" ;;
 esac
 
-asset="atoa-linux-${arch}"
+asset="atoa-${os_name}-${arch}"
+sums="SHA256SUMS"
 
 # glibc-only binaries; musl (Alpine) users must use npm.
-if [ -f /etc/os-release ] && grep -qi alpine /etc/os-release 2>/dev/null; then
+if [ "$os_name" = "linux" ] && [ -f /etc/os-release ] && grep -qi alpine /etc/os-release 2>/dev/null; then
   err "Alpine/musl is not supported by the prebuilt binary. Use: npm install -g @atoapayments/atoa-cli"
 fi
 
@@ -60,14 +63,14 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 
 echo "Downloading ${asset} (${VERSION})..."
 dl "${base}/${asset}" "${tmp}/${asset}" || err "download failed for ${base}/${asset}"
-dl "${base}/SHA256SUMS" "${tmp}/SHA256SUMS" || err "could not fetch SHA256SUMS"
-dl "${base}/SHA256SUMS.asc" "${tmp}/SHA256SUMS.asc" || echo "atoa install: no GPG signature found, skipping signature check" >&2
+dl "${base}/${sums}" "${tmp}/${sums}" || err "could not fetch ${sums}"
+dl "${base}/${sums}.asc" "${tmp}/${sums}.asc" || echo "atoa install: no GPG signature found, skipping signature check" >&2
 
 # --- verify checksum --------------------------------------------------------
 (
   cd "$tmp"
-  grep " ${asset}\$" SHA256SUMS >expected.sums \
-    || { echo "atoa install: ${asset} not listed in SHA256SUMS" >&2; exit 1; }
+  grep " ${asset}\$" "${sums}" >expected.sums \
+    || { echo "atoa install: ${asset} not listed in ${sums}" >&2; exit 1; }
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum -c expected.sums >/dev/null
   elif command -v shasum >/dev/null 2>&1; then
@@ -79,9 +82,13 @@ dl "${base}/SHA256SUMS.asc" "${tmp}/SHA256SUMS.asc" || echo "atoa install: no GP
 echo "Checksum OK."
 
 # --- verify GPG signature (best effort) -------------------------------------
-if [ -f "${tmp}/SHA256SUMS.asc" ] && command -v gpg >/dev/null 2>&1; then
-  if gpg --verify "${tmp}/SHA256SUMS.asc" "${tmp}/SHA256SUMS" >/dev/null 2>&1; then
+# A missing public key means we can't authenticate (warn, checksum still holds),
+# but a BADSIG means the signature is present and invalid (tampering) -> abort.
+if [ -f "${tmp}/${sums}.asc" ] && command -v gpg >/dev/null 2>&1; then
+  if gpg_out="$(gpg --verify "${tmp}/${sums}.asc" "${tmp}/${sums}" 2>&1)"; then
     echo "GPG signature OK."
+  elif printf '%s' "$gpg_out" | grep -q "BADSIG"; then
+    err "GPG signature is INVALID — the download may have been tampered with. Aborting."
   else
     echo "atoa install: GPG signature NOT verified (import Atoa's public key to authenticate; checksum still verified)." >&2
   fi
@@ -99,6 +106,12 @@ fi
 mkdir -p "$dest"
 install -m 0755 "${tmp}/${asset}" "${dest}/atoa"
 echo "Installed atoa -> ${dest}/atoa"
+
+# curl-downloaded binaries usually aren't quarantined, but strip the attribute
+# if it's present so macOS Gatekeeper doesn't block the first run.
+if [ "$os_name" = "darwin" ]; then
+  xattr -d com.apple.quarantine "${dest}/atoa" 2>/dev/null || true
+fi
 
 case ":${PATH}:" in
   *":${dest}:"*) ;;
