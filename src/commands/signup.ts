@@ -37,6 +37,7 @@ import {
   validateCountryCode,
   validatePhoneNumber
 } from "../lib/validators";
+import {DEFAULT_PHONE_COUNTRY_CODE} from "../lib/constants";
 
 type SignupArgs = CommonOptions & {
   email?: string;
@@ -457,7 +458,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     // "send → prompt → verify" two-step (re-sends the same request with the code).
     const phoneCountryCode = await input({
       message: "Phone country code, e.g. 44 (optional):",
-      default: prefill.phoneCountryCode || "44",
+      default: prefill.phoneCountryCode || DEFAULT_PHONE_COUNTRY_CODE,
       validate: validateCountryCode
     });
     const phoneNumber = await input({
