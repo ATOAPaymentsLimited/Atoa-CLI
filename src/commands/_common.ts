@@ -60,8 +60,6 @@ export function runWithContext<Args extends CommonOptions>(handler: Handler<Args
   };
 }
 
-// TODO: Regenerate should ask for creating a new one
-
 /**
  * Like runWithContext, but for the SDK-key commands: builds an SDK-authenticated context
  * (no JWT login required). Errors with a "run `atoa keys create`" hint when no SDK key is

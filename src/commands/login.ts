@@ -288,8 +288,6 @@ async function exchangeForTokens(
   return {tokens: {accessToken: grant.accessToken, refreshToken: grant.refreshToken}, businessId: grant.businessId};
 }
 
-// TODO confirm
-
 interface ResolvedBusiness {
   businessId: string;
   businessName?: string;
