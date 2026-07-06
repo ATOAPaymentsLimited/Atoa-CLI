@@ -457,7 +457,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     // "send → prompt → verify" two-step (re-sends the same request with the code).
     const phoneCountryCode = await input({
       message: "Phone country code, e.g. 44 (optional):",
-      default: prefill.phoneCountryCode,
+      default: prefill.phoneCountryCode || "44",
       validate: validateCountryCode
     });
     const phoneNumber = await input({
