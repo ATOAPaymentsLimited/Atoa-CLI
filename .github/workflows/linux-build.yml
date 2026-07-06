@@ -1,0 +1,68 @@
+name: Linux Build UAT
+
+on:
+  push:
+    branches:
+      - 'hotfix/linux-wf'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build-and-sign:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package Linux x64 binary
+        run: npx @yao-pkg/pkg . --targets node20-linux-x64 --output dist/atoa-linux-x64
+
+      - name: Fetch arm64 native keyring binding
+        # npm ci above only installs the x64 build of @napi-rs/keyring's native
+        # module. The arm64 target needs its own prebuilt .node binding pulled
+        # in so pkg's asset glob (see package.json "pkg.assets") can bundle it.
+        run: npm install --no-save --force @napi-rs/keyring-linux-arm64-gnu
+
+      - name: Package Linux arm64 binary
+        run: npx @yao-pkg/pkg . --targets node20-linux-arm64 --output dist/atoa-linux-arm64
+
+      - name: Make binaries executable
+        run: chmod +x dist/atoa-linux-x64 dist/atoa-linux-arm64
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum atoa-linux-x64 atoa-linux-arm64 > SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            dist/atoa-linux-x64
+            dist/atoa-linux-arm64
+
+      - name: Compute artifact name
+        shell: bash
+        run: echo "ARTIFACT_NAME=atoa-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/atoa-linux-x64
+            dist/atoa-linux-arm64
+            dist/SHA256SUMS
+          retention-days: 30
