@@ -10,7 +10,9 @@ import {AtoaError, printError, exitCodeFor} from "../lib/errors";
 import {buildContext, type CommandContext} from "../lib/context";
 import {buildHttpClient, assertTlsHardenedEnv} from "../lib/http";
 import {createSecretsStore} from "../lib/secrets-store";
-import {resolveBaseUrl} from "../lib/env";
+import {resolveBaseUrl, resolveDashboardUrl} from "../lib/env";
+import {normalizeBusinesses} from "../lib/businesses";
+import {onboardingResumeState, type BusinessRecord} from "../lib/onboarding-resume";
 import {
   setActiveBusinessId,
   getActiveBusinessId,
@@ -26,6 +28,15 @@ import {
 } from "../lib/config-store";
 import {withOtp} from "../lib/otp";
 import {isInteractive, renderKeyValues} from "../lib/output";
+import {
+  isValidEmail,
+  validateName,
+  validateBusinessName,
+  validateAddress,
+  validatePostcode,
+  validateCountryCode,
+  validatePhoneNumber
+} from "../lib/validators";
 
 type SignupArgs = CommonOptions & {
   email?: string;
@@ -92,7 +103,7 @@ async function otpSignup(args: SignupArgs): Promise<string> {
 
   process.stderr.write("\nCreate your Atoa account\n─────────────────────────────────────────\n");
   const email = (args.email || (await input({message: "Email address:"}))).trim();
-  if (!email.includes("@")) throw new AtoaError("A valid email address is required.", "validation");
+  if (!isValidEmail(email)) throw new AtoaError("Please enter a valid email address", "validation");
 
   // No credentials yet → a bare (auth: "none") client for the public auth endpoints.
   const http = buildHttpClient({baseUrl: resolveBaseUrl(), authHeader: "unused", verbose: !!args.verbose});
@@ -184,6 +195,103 @@ async function otpSignup(args: SignupArgs): Promise<string> {
   return email;
 }
 
+type StartDecision =
+  | {kind: "start"; fromStep: number; seedInfo?: Record<string, unknown>; startingNew?: boolean}
+  | {kind: "done"; message: string};
+
+/** Fetch a business record (status + businessInfo) by id, for resume detection and seeding. */
+async function fetchBusinessRecord(
+  ctx: CommandContext,
+  businessId: string
+): Promise<BusinessRecord & {businessInfo?: Record<string, unknown>}> {
+  const data = (await ctx.http.request({...V1_ROUTES.onboarding.getBusiness, pathParams: {businessId}})).data as {
+    business?: {
+      status?: string;
+      businessInfo?: Record<string, unknown>;
+      merchantBusinessInfo?: Record<string, unknown>;
+    };
+  };
+  const biz = data.business ?? {};
+  return {status: biz.status, businessInfo: biz.businessInfo ?? biz.merchantBusinessInfo};
+}
+
+/** The account's business id: the one bound to this profile, else the account's first business from the server. */
+async function discoverBusinessId(ctx: CommandContext): Promise<string | undefined> {
+  const local = await getActiveBusinessId(ctx.profileName);
+  if (local) return local;
+  try {
+    const id = normalizeBusinesses((await ctx.http.request({...V1_ROUTES.businesses.list})).data)[0]?.id;
+    if (id) await setActiveBusinessId(ctx.profileName, id); // cache so later step requests resolve :businessId
+    return id;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Decide which step to start at. Honors an explicit --from-step; otherwise auto-detects an
+ * in-progress business and prompts the user to continue it (jumping to the first incomplete
+ * step) or start a new one. Progress is inferred from populated fields — see onboarding-resume.ts.
+ */
+async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Promise<StartDecision> {
+  // Explicit override — power-user path, no prompt.
+  if (args.fromStep) {
+    const n = parseInt(args.fromStep, 10);
+    if (isNaN(n) || n < 1 || n > 4) throw new AtoaError("--from-step must be a number between 1 and 4", "validation");
+    if (n === 1) return {kind: "start", fromStep: 1};
+    const bizId = await getActiveBusinessId(ctx.profileName);
+    if (!bizId) {
+      throw new AtoaError(
+        `--from-step ${n} requires an active business ID. Run from step 1, or set the business with \`atoa business use <id>\`.`,
+        "validation"
+      );
+    }
+    // Best-effort seed (as before: a fetch failure still lets the entered data through).
+    try {
+      return {kind: "start", fromStep: n, seedInfo: (await fetchBusinessRecord(ctx, bizId)).businessInfo};
+    } catch {
+      return {kind: "start", fromStep: n};
+    }
+  }
+
+  // Auto-detect. No business yet → brand-new signup, straight to step 1 (no prompt).
+  const bizId = await discoverBusinessId(ctx);
+  if (!bizId) return {kind: "start", fromStep: 1};
+
+  let record: BusinessRecord & {businessInfo?: Record<string, unknown>};
+  try {
+    record = await fetchBusinessRecord(ctx, bizId);
+  } catch {
+    throw new AtoaError("Couldn't load your in-progress signup. Check your connection and try again.", "network");
+  }
+
+  const state = onboardingResumeState(record);
+  const name = (record.businessInfo?.legalBusinessName as string) || "your business";
+
+  if (state.kind === "resume") {
+    const choice = await select({
+      message: `You have an in-progress signup for "${name}".`,
+      choices: [
+        {name: `Continue where you left off (step ${state.step} of 4)`, value: "continue"},
+        {name: "Start a new business from scratch", value: "new"}
+      ]
+    });
+    if (choice === "continue") return {kind: "start", fromStep: state.step, seedInfo: record.businessInfo};
+    return {kind: "start", fromStep: 1, startingNew: true};
+  }
+
+  // Nothing to resume: fully onboarded, or KYB has locked the business past editing.
+  process.stderr.write(
+    (state.kind === "locked"
+      ? `"${name}" is already ${state.status.replace(/_/g, " ").toLowerCase()} and can't be edited from the CLI.`
+      : `"${name}" is already fully onboarded.`) + "\n"
+  );
+  if (!(await confirm({message: "Start a new business from scratch?", default: false}))) {
+    return {kind: "done", message: "Nothing to do."};
+  }
+  return {kind: "start", fromStep: 1, startingNew: true};
+}
+
 /** The onboarding wizard (steps 1–4), run with an authed context. */
 async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<void> {
   // Wizard is interactive-only
@@ -191,21 +299,15 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     throw new AtoaError("atoa signup is an interactive wizard and requires a TTY. Run it in a terminal.", "validation");
   }
 
-  const fromStep = args.fromStep ? parseInt(args.fromStep, 10) : 1;
-  if (isNaN(fromStep) || fromStep < 1 || fromStep > 4) {
-    throw new AtoaError("--from-step must be a number between 1 and 4", "validation");
+  // Decide where to start: an explicit --from-step, or auto-detect an in-progress
+  // business and let the user continue it (jump to the first incomplete step) or start over.
+  const start = await resolveOnboardingStart(ctx, args);
+  if (start.kind === "done") {
+    process.stderr.write(start.message + "\n");
+    return;
   }
-
-  // Steps >= 2 require an activeBusinessId
-  if (fromStep >= 2) {
-    const existingBizId = await getActiveBusinessId(ctx.profileName);
-    if (!existingBizId) {
-      throw new AtoaError(
-        `--from-step ${fromStep} requires an active business ID. Run from step 1, or set the business with \`atoa business use <id>\`.`,
-        "validation"
-      );
-    }
-  }
+  const fromStep = start.fromStep;
+  const startingNewOverExisting = start.startingNew ?? false;
 
   process.stderr.write("Atoa onboarding wizard\n");
   process.stderr.write("─────────────────────────────────────────\n");
@@ -217,6 +319,25 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
   // businessType is present, so every updateBusiness call must carry the FULL businessInfo
   // — we build it up across steps and resend it whole each time.
   const businessInfo: Record<string, unknown> = {};
+
+  // On resume the business already exists; seed the accumulator from the server record fetched
+  // during step resolution so the full-businessInfo resend doesn't wipe fields set in earlier steps.
+  if (start.seedInfo) {
+    for (const k of [
+      "legalBusinessName",
+      "tradingName",
+      "businessType",
+      "companyType",
+      "addressLine1",
+      "addressLine2",
+      "addressPostalCode",
+      "cityOrTown",
+      "averageMonthlyTransaction"
+    ]) {
+      if (start.seedInfo[k] != null) businessInfo[k] = start.seedInfo[k];
+    }
+    createdBusinessName = (businessInfo.tradingName ?? businessInfo.legalBusinessName) as string | undefined;
+  }
 
   // Prefill from the signed-in user's identity so we don't re-ask for data the
   // account already has (name/contact) — the prompts use these as defaults, so you
@@ -234,60 +355,6 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
   } catch {
     prefill = {};
   }
-
-  // On resume (--from-step >= 2) the business already exists; seed the accumulator from the server
-  // so the full-businessInfo resend doesn't wipe fields set in earlier steps.
-  if (fromStep >= 2) {
-    try {
-      const biz = (await ctx.http.request({...V1_ROUTES.onboarding.getBusiness})).data as {
-        business?: {businessInfo?: Record<string, unknown>; merchantBusinessInfo?: Record<string, unknown>};
-      };
-      const info = biz.business?.businessInfo ?? biz.business?.merchantBusinessInfo ?? {};
-      for (const k of [
-        "legalBusinessName",
-        "tradingName",
-        "businessType",
-        "companyType",
-        "addressLine1",
-        "addressLine2",
-        "addressPostalCode",
-        "cityOrTown",
-        "averageMonthlyTransaction"
-      ]) {
-        if (info[k] != null) businessInfo[k] = info[k];
-      }
-      createdBusinessName = (businessInfo.tradingName ?? businessInfo.legalBusinessName) as string | undefined;
-    } catch {
-      // Best-effort: if the fetch fails, later steps still send what the user enters.
-    }
-  }
-
-  // Input validators mirror the dashboard's registration field rules.
-  const NAME_RE = /^[a-zA-Z'\s]+$/; // letters, apostrophes and spaces only — no digits or symbols
-  const validateName = (label: string) => (v: string) => {
-    const s = (v ?? "").trim();
-    if (!s) return `${label} cannot be empty`;
-    return NAME_RE.test(s) || "Special characters & numbers are not allowed.";
-  };
-  const validateBusinessName = (v: string) => {
-    const s = (v ?? "").trim();
-    if (!s) return "Business name cannot be empty";
-    return /^[a-zA-Z0-9 ']+$/.test(s) || "No special characters or punctuation, please!";
-  };
-  const validateAddress = (v: string) => (v ?? "").trim().length > 2 || "Please enter a valid address";
-  const validatePostcode = (v: string) => (v ?? "").trim().length > 2 || "Please enter a valid postal code";
-  // Phone is optional; when supplied it must be digits only (country code 1–4 digits).
-  const validateCountryCode = (v: string) => {
-    const s = (v ?? "").trim();
-    if (!s) return true;
-    return /^\d{1,4}$/.test(s) || "Please enter a valid country code (numbers only, e.g. 44).";
-  };
-  const validatePhoneNumber = (v: string) => {
-    const s = (v ?? "").trim();
-    if (!s) return true;
-    if (!/^\d+$/.test(s)) return "Please enter a valid phone number (numbers only).";
-    return s.replace(/^0+/, "").length >= 10 || "Please enter a valid phone number.";
-  };
 
   // ── Step 1: Business details (name, industry, consent) ───────────────────
   if (fromStep <= 1) {
@@ -327,7 +394,18 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     if (businessType) businessInfo.businessType = businessType;
 
     // Create the business (createBusiness takes the businessInfo FLAT as the whole body).
-    const res = await ctx.http.request({...V1_ROUTES.onboarding.createBusiness, body: businessInfo});
+    // The backend refuses a second business while an existing one is still pending/in-review/etc.
+    // When starting over an existing business, surface that error and point to the dashboard.
+    const res = await ctx.http
+      .request({...V1_ROUTES.onboarding.createBusiness, body: businessInfo})
+      .catch((err: AtoaError) => {
+        if (!startingNewOverExisting) throw err;
+        throw new AtoaError(
+          `${err.message}\nTo manage or finish your existing business, use the dashboard: ${resolveDashboardUrl()}`,
+          err.kind ?? "generic",
+          {status: err.status, requestId: err.requestId}
+        );
+      });
     const businessId = (res.data as {business?: {id?: string}})?.business?.id;
     if (!businessId) {
       throw new AtoaError("Create-business response did not include a business id.", "generic");

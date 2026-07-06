@@ -37,6 +37,14 @@ const mock = vi.hoisted(() => {
   let otpBehaviour: "ok" | "otp" | "badOtp" | "rateLimit" = "otp";
   // Whether a JWT session already exists → toggles the email-OTP account-creation path (otpSignup).
   let sessionExists = true;
+  // The business record GET /api/business/:businessId returns — drives auto-resume step detection.
+  const DEFAULT_SEED = {
+    legalBusinessName: "Existing Ltd",
+    tradingName: "Existing",
+    businessType: {id: "bt_1", name: "Retail"}
+  };
+  let seedBusinessInfo: Record<string, unknown> = {...DEFAULT_SEED};
+  let seedStatus: string | undefined = undefined;
 
   return {
     requests,
@@ -46,6 +54,10 @@ const mock = vi.hoisted(() => {
     },
     setSessionExists(b: boolean) {
       sessionExists = b;
+    },
+    setSeedBusiness(info: Record<string, unknown>, status?: string) {
+      seedBusinessInfo = info;
+      seedStatus = status;
     },
     sessionActive: () => sessionExists,
     setActiveBusinessId(id: string | undefined) {
@@ -59,6 +71,8 @@ const mock = vi.hoisted(() => {
       sessionExists = true;
       setBusinessIdCalls = [];
       activeBusinessId = undefined;
+      seedBusinessInfo = {...DEFAULT_SEED};
+      seedStatus = undefined;
     },
     getActiveBusinessId: async (_p: string) => activeBusinessId,
     setActiveBusinessId_fn: async (profileName: string, businessId: string) => {
@@ -96,18 +110,10 @@ const mock = vi.hoisted(() => {
             return {status: 200, data: [{id: "s_1", description: "Twitter"}], requestId: "r"};
           }
           if (req.path === "/api/business/:businessId" && req.method === "GET") {
-            // Resume seed (--from-step >= 2).
+            // Resume seed (--from-step >= 2, and auto-resume detection).
             return {
               status: 200,
-              data: {
-                business: {
-                  businessInfo: {
-                    legalBusinessName: "Existing Ltd",
-                    tradingName: "Existing",
-                    businessType: {id: "bt_1", name: "Retail"}
-                  }
-                }
-              },
+              data: {business: {status: seedStatus, businessInfo: seedBusinessInfo}},
               requestId: "r"
             };
           }
@@ -282,6 +288,7 @@ describe("signup — happy path (full wizard)", () => {
     await (signup.run as any)({args: {}, rawArgs: []});
 
     expect(paths()).toEqual([
+      "/api/business/", // auto-resume: look for an in-progress business (list is empty → fresh signup)
       "/api/user/profile/", // prefill
       "/api/merchant/business-types/all", // step1 industry
       "/api/business/", // step1 createBusiness
@@ -428,6 +435,51 @@ describe("signup — --from-step 3", () => {
     expect(process.exitCode).toBe(3);
     expect(stderr.mock.calls.map((c) => String(c[0])).join("")).toMatch(/business/i);
     stderr.mockRestore();
+  });
+});
+
+describe("signup — auto-resume (continue existing)", () => {
+  beforeEach(() => {
+    mock.setActiveBusinessId("biz_existing");
+    // Structure saved but address missing → the crash scenario → auto-resume should target step 3.
+    mock.setSeedBusiness({
+      legalBusinessName: "Existing Ltd",
+      tradingName: "Existing",
+      businessType: {id: "bt_1", name: "Retail"},
+      companyType: "COMPANY_LTD"
+    });
+    promptMocks.input.mockReset();
+    promptMocks.input
+      .mockResolvedValueOnce("John") // firstName
+      .mockResolvedValueOnce("Doe") // lastName
+      .mockResolvedValueOnce("44") // phoneCountryCode
+      .mockResolvedValueOnce("7700900001") // phoneNumber
+      .mockResolvedValueOnce("654321") // OTP
+      .mockResolvedValueOnce("1 High St") // address
+      .mockResolvedValue("EC1A 1BB"); // postcode
+    promptMocks.select.mockReset();
+    promptMocks.select
+      .mockResolvedValueOnce("continue") // resume prompt: continue vs start new
+      .mockResolvedValueOnce("0-1000") // step4 turnover
+      .mockResolvedValue("Twitter"); // step4 source
+    promptMocks.confirm.mockReset();
+    promptMocks.confirm.mockResolvedValue(true);
+  });
+
+  it("detects the in-progress business and jumps to the first incomplete step (no re-create)", async () => {
+    await (signup.run as any)({args: {}, rawArgs: []});
+
+    // Prompted the user to continue vs start a new business.
+    const promptChoices = (promptMocks.select.mock.calls[0][0] as any).choices.map((c: any) => c.value);
+    expect(promptChoices).toEqual(["continue", "new"]);
+
+    // Continuing reuses the existing business — no create...
+    expect(mock.requests.some((r) => r.path === "/api/business/" && r.method === "POST")).toBe(false);
+    // ...and resumes at step 3: the address PUT carries the seeded businessType so the backend replace keeps it.
+    const addr = byPath("/api/business/:businessId").find(
+      (r) => r.method === "PUT" && r.body?.businessInfo?.addressLine1
+    );
+    expect(addr?.body?.businessInfo?.businessType).toEqual({id: "bt_1", name: "Retail"});
   });
 });
 
