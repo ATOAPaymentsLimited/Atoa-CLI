@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {walkAllPages} from "../../lib/pagination";
 
 type TransactionsArgs = CommonOptions & {
@@ -21,7 +21,7 @@ export default defineCommand({
     itemsPerPage: {type: "string", default: "20", description: "records per page"},
     pageAll: {type: "boolean", description: "auto-walk all pages"}
   }),
-  run: runWithContext<TransactionsArgs>(async (ctx, args) => {
+  run: runWithSdkKey<TransactionsArgs>(async (ctx, args) => {
     const path = `/api/bank/accounts/${encodeURIComponent(args.id as string)}/transactions`;
     const baseQuery = {
       from: args.from as string,

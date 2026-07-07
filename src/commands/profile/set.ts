@@ -66,13 +66,8 @@ export default defineCommand({
         if (value !== "sandbox" && value !== "production") {
           throw new AtoaError(`env must be "sandbox" or "production", got: "${value}"`, "validation");
         }
-        if (!profile.envs[value as Env]) {
-          throw new AtoaError(
-            `profile "${profileName}" has no ${value} credentials. Run \`atoa login --env ${value}\` first.`,
-            "validation"
-          );
-        }
-
+        // No per-env credential check: the JWT session is env-independent, and SDK keys are
+        // created on demand. `defaultEnv` is just the env that SDK/data commands default to.
         const current = profile.defaultEnv;
         if (current === value) {
           process.stdout.write(`profile "${profileName}" already defaults to ${value} — no change.\n`);

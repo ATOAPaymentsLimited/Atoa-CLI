@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {walkAllPages} from "../../lib/pagination";
 
 type ListArgs = CommonOptions & {
@@ -27,7 +27,7 @@ export default defineCommand({
     paymentMethod: {type: "string", description: "comma-separated payment methods (PAY_BY_BANK, CARD)"},
     storeIds: {type: "string", description: "comma-separated store IDs"}
   }),
-  run: runWithContext<ListArgs>(async (ctx, args) => {
+  run: runWithSdkKey<ListArgs>(async (ctx, args) => {
     const split = (v?: string) => (v ? v.split(",").map((s) => s.trim()) : undefined);
 
     const filters = {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {defineCommand, runMain} from "citty";
+import packageJson from "../package.json";
 import {assertTlsHardenedEnv} from "./lib/bootstrap";
 import {printError} from "./lib/errors";
 import {handleCompletion, type CompletionShell} from "./lib/completion";
@@ -15,29 +16,39 @@ const main = defineCommand({
   meta: {
     name: "atoa",
     description: "Atoa payment API CLI",
-    version: "0.1.0"
+    version: packageJson.version
   },
   subCommands: {
     login: () => import("./commands/login").then((m) => m.default),
     logout: () => import("./commands/logout").then((m) => m.default),
     whoami: () => import("./commands/whoami").then((m) => m.default),
     keys: () => import("./commands/keys").then((m) => m.default),
+    sessions: () => import("./commands/sessions").then((m) => m.default),
+    business: () => import("./commands/business").then((m) => m.default),
     profile: () => import("./commands/profile").then((m) => m.default),
     get: () => import("./commands/get").then((m) => m.default),
     post: () => import("./commands/post").then((m) => m.default),
     delete: () => import("./commands/delete").then((m) => m.default),
 
     reset: () => import("./commands/reset").then((m) => m.default),
-    payments: () => import("./commands/payments").then((m) => m.default),
     stores: () => import("./commands/stores").then((m) => m.default),
-    institutions: () => import("./commands/institutions").then((m) => m.default),
+    bank: () => import("./commands/bank").then((m) => m.default),
+    kyb: () => import("./commands/kyb").then((m) => m.default),
+    staff: () => import("./commands/staff").then((m) => m.default),
+    roles: () => import("./commands/roles").then((m) => m.default),
+    "payment-links": () => import("./commands/payment-links").then((m) => m.default),
+    signup: () => import("./commands/signup").then((m) => m.default),
+    webhooks: () => import("./commands/webhooks").then((m) => m.default),
+
+    // SDK-key commands (auth via ~/atoa/auth/secret_key.json; the guard prompts for a key if missing)
+    payments: () => import("./commands/payments").then((m) => m.default),
     customers: () => import("./commands/customers").then((m) => m.default),
     "payment-methods": () => import("./commands/payment-methods").then((m) => m.default),
     "card-on-file": () => import("./commands/card-on-file").then((m) => m.default),
     refunds: () => import("./commands/refunds").then((m) => m.default),
-    webhooks: () => import("./commands/webhooks").then((m) => m.default),
-    "bank-feed": () => import("./commands/bank-feed").then((m) => m.default),
     payouts: () => import("./commands/payouts").then((m) => m.default),
+    "bank-feed": () => import("./commands/bank-feed").then((m) => m.default),
+    institutions: () => import("./commands/institutions").then((m) => m.default),
 
     completion: () => import("./commands/completion").then((m) => m.default)
   }

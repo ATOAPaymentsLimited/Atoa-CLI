@@ -1,6 +1,6 @@
 import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type RevokeArgs = CommonOptions & {accountAuthId?: string};
 
@@ -13,7 +13,7 @@ export default defineCommand({
         "accountAuthId to revoke a single consent. Leave unset to revoke every bank-feed consent for this merchant."
     }
   }),
-  run: runWithContext<RevokeArgs>(async (ctx, args) => {
+  run: runWithSdkKey<RevokeArgs>(async (ctx, args) => {
     const path = "/api/bank/auth/revoke";
     const body = args.accountAuthId ? {accountAuthId: args.accountAuthId} : undefined;
     const message = args.accountAuthId

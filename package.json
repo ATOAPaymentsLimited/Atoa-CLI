@@ -1,6 +1,6 @@
 {
   "name": "@atoapayments/atoa-cli",
-  "version": "0.1.1",
+  "version": "0.2.7",
   "description": "First-party CLI for the Atoa payment API.",
   "license": "MIT",
   "private": false,
@@ -8,19 +8,22 @@
   "bin": {
     "atoa": "./bin/atoa.js"
   },
-  "files": ["bin", "dist"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "pkg": {
-    "scripts": "dist/**/*.js",
-    "assets": [
-      "node_modules/@napi-rs/keyring-*/**/*.node"
-    ]
+    "scripts": "dist/**/*.js"
   },
   "scripts": {
-    "build": "tsup",
-    "build:release": "tsup",
+    "build": "npm run gen:logo && tsup",
+    "build:release": "npm run gen:logo && tsup",
     "clean": "rimraf dist",
     "dev": "tsx src/cli.ts",
+    "dev:local": "cross-env ATOA_ALLOW_INSECURE=1 ATOA_BASE_URL=http://localhost:9090/server ATOA_DASHBOARD_URL=http://localhost:3000 tsx src/cli.ts",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
     "prettier": "prettier \"src/**/*.ts\" \"test/**/*.ts\" --write",
@@ -28,11 +31,11 @@
     "prepublishOnly": "npm run lint && npm run test:unit && npm run build",
     "test": "vitest run --coverage",
     "test:unit": "vitest run test/lib test/commands",
-    "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration"
+    "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration",
+    "gen:logo": "node scripts/gen-logo.mjs"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
-    "@napi-rs/keyring": "^1.1.4",
     "citty": "^0.2.2",
     "cli-table3": "^0.6.5",
     "js-yaml": "^4.1.0",

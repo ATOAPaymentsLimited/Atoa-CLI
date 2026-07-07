@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type GetArgs = CommonOptions & {id?: string; customer?: string};
 
@@ -9,7 +9,7 @@ export default defineCommand({
     id: {type: "positional", required: true, description: "card ID"},
     customer: {type: "string", required: true, description: "customer ID"}
   }),
-  run: runWithContext<GetArgs>(async (ctx, args) => {
+  run: runWithSdkKey<GetArgs>(async (ctx, args) => {
     const path = `/api/customers/${encodeURIComponent(args.customer as string)}/cards/${encodeURIComponent(args.id as string)}`;
 
     if (ctx.dryRun) {

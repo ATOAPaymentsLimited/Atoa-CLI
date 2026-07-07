@@ -62,6 +62,27 @@ describe("assertTlsHardenedEnv (re-exported from bootstrap)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Request target confinement — a path must not rewrite the host
+// ---------------------------------------------------------------------------
+
+describe("buildHttpClient — off-origin request confinement", () => {
+  it("rejects a path that rewrites the host, and never calls fetch", async () => {
+    const client = buildHttpClient({baseUrl: "https://api.atoa.me", authHeader: "Bearer x", verbose: false});
+    await expect(client.request({method: "GET", path: "@evil.example/steal"})).rejects.toThrow(/off-origin/);
+    await expect(client.request({method: "GET", path: ".evil.example/steal"})).rejects.toThrow(/off-origin/);
+    expect(undiciMock.fetch).not.toHaveBeenCalled();
+  });
+
+  it("allows a normal absolute path on the configured origin", async () => {
+    undiciMock.fetch.mockResolvedValueOnce(jsonResponse(200, {ok: true}));
+    const client = buildHttpClient({baseUrl: "https://api.atoa.me", authHeader: "Bearer x", verbose: false});
+    const res = await client.request({method: "GET", path: "/v1/thing"});
+    expect(res.status).toBe(200);
+    expect(undiciMock.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Default headers — User-Agent, X-Cli-Version, Authorization, Accept
 // ---------------------------------------------------------------------------
 

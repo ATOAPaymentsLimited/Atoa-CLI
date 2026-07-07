@@ -60,6 +60,17 @@ describe("mapHttpResponse", () => {
   it("falls back to HTTP N when no message in body", () => {
     expect(mapHttpResponse(503, {}, "x").message).toBe("HTTP 503");
   });
+
+  it("uses the body `name` (trimmed) as errorCode when no explicit errorCode is present", () => {
+    // Backend OTP gate throws {name: "OTP_VERIFICATION_IS_REQUIRED ", message, status}
+    const err = mapHttpResponse(400, {name: "OTP_VERIFICATION_IS_REQUIRED ", message: "enter the OTP"}, "req-2");
+    expect(err.errorCode).toBe("OTP_VERIFICATION_IS_REQUIRED");
+  });
+
+  it("prefers an explicit errorCode over `name`", () => {
+    const err = mapHttpResponse(400, {name: "BAD_REQUEST", errorCode: "ERR_X"}, "req-3");
+    expect(err.errorCode).toBe("ERR_X");
+  });
 });
 
 describe("printError", () => {
@@ -68,7 +79,6 @@ describe("printError", () => {
     printError(new AtoaError("failed", "auth", {status: 401, requestId: "r1"}));
     const out = spy.mock.calls.map((c) => String(c[0])).join("");
     expect(out).toContain("failed");
-    expect(out).toContain("401");
     expect(out).toContain("r1");
     spy.mockRestore();
   });

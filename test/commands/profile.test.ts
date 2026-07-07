@@ -3,19 +3,18 @@ import {promises as fs} from "fs";
 import {tmpdir} from "os";
 import {join} from "path";
 
-// Profile commands read/write local config + keychain (no HTTP). Tests run
-// against a tmpdir via ATOA_HOME, and we force the file backend by mocking
-// secrets-store (vi.mock on @napi-rs/keyring doesn't apply to the require()).
-vi.mock("../../src/lib/secrets-store", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/secrets-store")>();
-  const {buildFileSecretsStore} = await import("../helpers/file-store-mock");
-  return {
-    ...actual,
-    createSecretsStore: async () => buildFileSecretsStore(actual.secretsFilePath)
-  };
-});
+/**
+ * Profile commands read/write the local config + JWT session file directly (no HTTP).
+ * We test them against a real tmpdir filesystem via ATOA_HOME.
+ *
+ * There is no OS keychain — `createSecretsStore()` is always the file store, and
+ * JWT sessions live in ~/.atoa/auth/session.json with shape:
+ *   {"sessions": {"<profile>": {"accessToken", "refreshToken"}}}
+ */
 
-import {secretsFilePath} from "../../src/lib/secrets-store";
+import {sessionFilePath, authDir} from "../../src/lib/secrets-store";
+
+type Session = {accessToken: string; refreshToken: string};
 
 let scratch: string;
 const configPath = () => join(scratch, ".config", "atoa", "config.json");
@@ -29,9 +28,14 @@ async function readConfig(): Promise<any> {
   return JSON.parse(await fs.readFile(configPath(), "utf8"));
 }
 
-async function readSecrets(): Promise<Record<string, string>> {
+async function writeSessions(sessions: Record<string, Session>): Promise<void> {
+  await fs.mkdir(authDir(), {recursive: true, mode: 0o700});
+  await fs.writeFile(sessionFilePath(), JSON.stringify({sessions}), {mode: 0o600});
+}
+
+async function readSessions(): Promise<Record<string, Session>> {
   try {
-    return JSON.parse(await fs.readFile(secretsFilePath(), "utf8"));
+    return JSON.parse(await fs.readFile(sessionFilePath(), "utf8")).sessions ?? {};
   } catch {
     return {};
   }
@@ -43,6 +47,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   delete process.env.ATOA_HOME;
   await fs.rm(scratch, {recursive: true, force: true}).catch(() => undefined);
 });
@@ -55,39 +60,49 @@ import rename from "../../src/commands/profile/rename";
 import del from "../../src/commands/profile/delete";
 
 describe("profile list", () => {
-  it("reports 'no profiles configured' when none exist", async () => {
+  it("reports 'no signed-in profiles' when none exist", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (list.run as any)({args: {}, rawArgs: []});
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/no profiles configured/);
+    expect(out).toMatch(/no signed-in profiles/);
     stdout.mockRestore();
   });
 
-  it("renders a table including the active profile marker", async () => {
+  it("renders a list with the active profile marked and no env columns", async () => {
+    await writeConfig({
+      schemaVersion: 1,
+      activeProfile: "acme",
+      profiles: {acme: {businessId: "biz_1", displayName: "Acme Ltd", envs: {}}}
+    });
+    await writeSessions({acme: {accessToken: "a", refreshToken: "r"}});
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await (list.run as any)({args: {}, rawArgs: []});
+    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
+    // Default view is now a table (active | name | business columns).
+    expect(out).toMatch(/active/);
+    expect(out).toMatch(/\*/); // active marker
+    expect(out).toMatch(/acme/);
+    expect(out).toMatch(/Acme Ltd/);
+    // env columns dropped
+    expect(out).not.toMatch(/SANDBOX|PRODUCTION|DEFAULT_ENV/);
+    stdout.mockRestore();
+  });
+
+  it("omits profiles without a JWT session (they'd need re-login)", async () => {
     await writeConfig({
       schemaVersion: 1,
       activeProfile: "acme",
       profiles: {
-        acme: {
-          businessId: "biz_1",
-          displayName: "Acme Ltd",
-          defaultEnv: "sandbox",
-          envs: {sandbox: {tokenFingerprint: "RlM="}}
-        }
+        acme: {businessId: "biz_1", displayName: "Acme Ltd", envs: {}},
+        stale: {businessId: "biz_2", displayName: "Stale Co", envs: {}}
       }
     });
+    await writeSessions({acme: {accessToken: "a", refreshToken: "r"}}); // only acme is signed in
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (list.run as any)({args: {}, rawArgs: []});
-    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/NAME/);
-    expect(out).toMatch(/BUSINESS/);
-    expect(out).toMatch(/SANDBOX/);
-    expect(out).toMatch(/acme/);
-    expect(out).toMatch(/Acme Ltd/);
-    expect(out).toMatch(/sandbox/);
-    expect(out).toMatch(/…RlM=/);
-    // No businessId column (was removed in §6.6 / round-4 cleanup)
-    expect(out).not.toMatch(/BUSINESS_ID/);
+    await (list.run as any)({args: {output: "json"}, rawArgs: []});
+    const parsed = JSON.parse(stdout.mock.calls.map((c) => String(c[0])).join(""));
+    expect(parsed.profiles).toHaveLength(1);
+    expect(parsed.profiles[0].name).toBe("acme");
     stdout.mockRestore();
   });
 
@@ -97,6 +112,7 @@ describe("profile list", () => {
       activeProfile: "acme",
       profiles: {acme: {businessId: "biz_1", displayName: "Acme", envs: {}}}
     });
+    await writeSessions({acme: {accessToken: "a", refreshToken: "r"}});
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (list.run as any)({args: {output: "json"}, rawArgs: []});
     const raw = stdout.mock.calls.map((c) => String(c[0])).join("");
@@ -104,6 +120,9 @@ describe("profile list", () => {
     expect(parsed.profiles).toHaveLength(1);
     expect(parsed.profiles[0].name).toBe("acme");
     expect(parsed.profiles[0].active).toBe(true);
+    expect(parsed.profiles[0].business).toBe("Acme");
+    // env fields dropped from JSON too
+    expect(parsed.profiles[0]).not.toHaveProperty("defaultEnv");
     stdout.mockRestore();
   });
 });
@@ -253,7 +272,7 @@ describe("profile set", () => {
     process.exitCode = 0;
   });
 
-  it("rejects switching to an env with no credentials", async () => {
+  it("switches defaultEnv even when that env has no stored credentials (JWT is env-independent)", async () => {
     await writeConfig({
       schemaVersion: 1,
       activeProfile: "acme",
@@ -261,13 +280,13 @@ describe("profile set", () => {
         acme: {businessId: "b1", displayName: "Acme", defaultEnv: "sandbox", envs: {sandbox: {tokenFingerprint: "x"}}}
       }
     });
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (set.run as any)({args: {assignment: "env=production", yes: true}, rawArgs: []});
-    const err = stderr.mock.calls.map((c) => String(c[0])).join("");
-    expect(err).toMatch(/has no production credentials/);
-    expect(process.exitCode).toBe(3);
-    stderr.mockRestore();
-    process.exitCode = 0;
+    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
+    // No per-env credential gate any more: defaultEnv just records the SDK/data command default.
+    expect(out).toMatch(/env = production/);
+    expect(process.exitCode).toBe(0);
+    stdout.mockRestore();
   });
 
   it("no-ops when the new env equals the current default", async () => {
@@ -362,15 +381,16 @@ describe("profile rename", () => {
     stdout.mockRestore();
   });
 
-  it("renames + re-keys keychain slots with --yes", async () => {
+  it("renames the profile and clears the old JWT session with --yes", async () => {
     await writeConfig({
       schemaVersion: 1,
       activeProfile: "acme",
-      profiles: {acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x"}}}}
+      profiles: {
+        acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x", authMode: "jwt"}}}
+      }
     });
-    // Pre-stage a token
-    await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-    await fs.writeFile(secretsFilePath(), JSON.stringify({"acme:sandbox": "sb-token"}), {mode: 0o600});
+    // Pre-stage a JWT session under the old name.
+    await writeSessions({acme: {accessToken: "at", refreshToken: "rt"}});
 
     await (rename.run as any)({args: {oldName: "acme", newName: "acme-uk", yes: true}, rawArgs: []});
     const cfg = await readConfig();
@@ -378,9 +398,9 @@ describe("profile rename", () => {
     expect(cfg.profiles).not.toHaveProperty("acme");
     expect(cfg.activeProfile).toBe("acme-uk"); // pointer follows
 
-    const secrets = await readSecrets();
-    expect(secrets["acme-uk:sandbox"]).toBe("sb-token");
-    expect(secrets["acme:sandbox"]).toBeUndefined();
+    // The old session is swept up; user re-logs in under the new name.
+    const sessions = await readSessions();
+    expect(sessions.acme).toBeUndefined();
   });
 
   it("no-op when oldName === newName", async () => {
@@ -413,32 +433,32 @@ describe("profile delete", () => {
     stdout.mockRestore();
   });
 
-  it("--yes removes config entry and clears slots", async () => {
+  it("--yes removes config entry and clears the JWT session", async () => {
     await writeConfig({
       schemaVersion: 1,
-      profiles: {acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x"}}}}
+      profiles: {
+        acme: {businessId: "b1", displayName: "Acme", envs: {sandbox: {tokenFingerprint: "x", authMode: "jwt"}}}
+      }
     });
-    await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-    await fs.writeFile(secretsFilePath(), JSON.stringify({"acme:sandbox": "tk"}), {mode: 0o600});
+    await writeSessions({acme: {accessToken: "at", refreshToken: "rt"}});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (del.run as any)({args: {name: "acme", yes: true}, rawArgs: []});
     const cfg = await readConfig();
     expect(cfg.profiles).not.toHaveProperty("acme");
-    const secrets = await readSecrets();
-    expect(secrets["acme:sandbox"]).toBeUndefined();
+    const sessions = await readSessions();
+    expect(sessions.acme).toBeUndefined();
     stdout.mockRestore();
   });
 
-  it("scrubs orphaned secret slots even when config entry is absent", async () => {
+  it("scrubs an orphaned session even when config entry is absent", async () => {
     await writeConfig({schemaVersion: 1, profiles: {}});
-    await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-    await fs.writeFile(secretsFilePath(), JSON.stringify({"orphan:sandbox": "tk"}), {mode: 0o600});
+    await writeSessions({orphan: {accessToken: "at", refreshToken: "rt"}});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await (del.run as any)({args: {name: "orphan"}, rawArgs: []});
-    const secrets = await readSecrets();
-    expect(secrets["orphan:sandbox"]).toBeUndefined();
+    const sessions = await readSessions();
+    expect(sessions.orphan).toBeUndefined();
     stdout.mockRestore();
   });
 });

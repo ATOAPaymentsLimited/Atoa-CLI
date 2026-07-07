@@ -1,82 +1,55 @@
 import {defineCommand} from "citty";
-import {isProfileIncomplete, readConfig, type EnvState} from "../../lib/config-store";
+import {readConfig} from "../../lib/config-store";
 import {createSecretsStore} from "../../lib/secrets-store";
 import {printError, exitCodeFor, type AtoaError} from "../../lib/errors";
+import {print, resolveFormat} from "../../lib/output";
 
 export default defineCommand({
-  meta: {name: "list", description: "List all business profiles on this machine"},
+  meta: {name: "list", description: "List the signed-in business profiles on this machine"},
   args: {
     output: {type: "string", description: "json|table|yaml (default: table)"}
   },
   async run({args}) {
     try {
       const cfg = await readConfig();
-      const profiles = cfg.profiles;
       const store = await createSecretsStore();
-      const rows = await Promise.all(
-        Object.entries(profiles).map(async ([name, p]) => ({
-          name,
-          active: name === cfg.activeProfile,
-          displayName: p.displayName,
-          defaultEnv: p.defaultEnv ?? null,
-          envs: p.envs,
-          incomplete: isProfileIncomplete(p),
-          hasSandbox: !!(await store.get(name, "sandbox")),
-          hasProduction: !!(await store.get(name, "production"))
-        }))
-      );
+
+      // CLI is JWT-only; a profile is usable only if it has a stored JWT session.
+      // Profiles without one would need `atoa login` anyway, so they're omitted.
+      const rows = (
+        await Promise.all(
+          Object.entries(cfg.profiles).map(async ([name, p]) => ({
+            name,
+            active: name === cfg.activeProfile,
+            business: p.displayName,
+            hasToken: !!(await store.getJwtTokens(name))
+          }))
+        )
+      ).filter((r) => r.hasToken);
 
       if (rows.length === 0) {
-        process.stdout.write("no profiles configured — run `atoa login`\n");
+        process.stdout.write("no signed-in profiles — run `atoa login`\n");
         return;
       }
 
-      if (args.output === "json") {
-        process.stdout.write(JSON.stringify({profiles: rows, backend: store.backend()}, null, 2) + "\n");
+      // Explicit --output honoured; default to a table for humans.
+      const format = args.output ? resolveFormat(args.output) : "table";
+
+      // Keep the richer object shape for scripts; `active` stays a boolean there.
+      if (format === "json") {
+        const profiles = rows.map((r) => ({name: r.name, active: r.active, business: r.business}));
+        print({profiles, backend: store.backend()}, "json");
         return;
       }
 
-      const headers = ["NAME", "ACTIVE", "BUSINESS", "DEFAULT_ENV", "SANDBOX", "PRODUCTION"];
-      const lines: string[][] = rows.map((r) => [
-        r.name,
-        r.active ? "*" : "",
-        r.displayName,
-        r.defaultEnv ?? "-",
-        formatEnvCell(r.envs.sandbox, r.hasSandbox),
-        formatEnvCell(r.envs.production, r.hasProduction)
-      ]);
-      printTable(headers, lines);
-
-      const incompleteNames = rows.filter((r) => r.incomplete).map((r) => r.name);
-      if (incompleteNames.length > 0) {
-        process.stdout.write(
-          `\nwarning: incomplete profile(s) — ${incompleteNames.join(", ")}. ` +
-            "Re-pair via `atoa login` or remove with `atoa logout --profile <name>`.\n"
-        );
-      }
+      // Tabular / yaml view: the active profile is marked with `*` in its own column.
+      print(
+        rows.map((r) => ({active: r.active ? "*" : "", name: r.name, business: r.business})),
+        format
+      );
     } catch (err) {
       printError(err);
       process.exitCode = exitCodeFor((err as AtoaError).kind);
     }
   }
 });
-
-/**
- * Renders a per-env cell. Format: `…<fp>` or `-` when empty. If the keychain
- * reports no token despite a config entry, mark with `[!no-token]` so the
- * inconsistency is visible.
- */
-function formatEnvCell(state: EnvState | undefined, hasToken: boolean): string {
-  if (!state) return "-";
-  const fp = state.tokenFingerprint ? `…${state.tokenFingerprint}` : "?";
-  const marker = hasToken ? "" : " [!no-token]";
-  return `${fp}${marker}`;
-}
-
-function printTable(headers: string[], rows: string[][]): void {
-  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
-  const fmt = (row: string[]) => row.map((cell, i) => cell.padEnd(widths[i])).join("  ");
-  process.stdout.write(fmt(headers) + "\n");
-  process.stdout.write(widths.map((w) => "-".repeat(w)).join("  ") + "\n");
-  for (const r of rows) process.stdout.write(fmt(r) + "\n");
-}

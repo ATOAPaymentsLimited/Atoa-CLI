@@ -1,47 +1,38 @@
 import {defineCommand} from "citty";
-import {confirm, select} from "@inquirer/prompts";
-import {withCommonArgs, runWithContext, isFlagPassed, type CommonOptions} from "../_common";
-import type {CommandContext} from "../../lib/context";
-import {createSecretsStore} from "../../lib/secrets-store";
-import {readProfile, writeProfile, type Env, type EnvState} from "../../lib/config-store";
-import {fingerprintToken} from "../../lib/auth";
-import {planAction} from "../../lib/keys-plan";
+import {confirm} from "@inquirer/prompts";
+import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
+import {V1_ROUTES} from "../../lib/v1-routes";
+import {saveSdkKey, latestSdkAccessId, findSdkKey} from "../../lib/sdk-key-file";
 
 type RegenArgs = CommonOptions & {id?: string};
-
-interface SdkAccessRegenResponse {
-  sandboxApiSecret?: string;
-  productionApiSecret?: string;
-  apiSecret?: string;
-}
 
 export default defineCommand({
   meta: {
     name: "regenerate",
     description:
-      "Rotate one SDK key for the active profile. Picks the env interactively when the profile has both — pass --env to skip the prompt. New bearer is shown ONCE."
+      "Rotate an SDK key. The old token stops working immediately; the new apiSecret is written to ~/.atoa/auth/secret_key.json (path is printed)."
   },
   args: withCommonArgs({
     id: {
       type: "positional",
       required: false,
-      description: "sdkAccessId to rotate (overrides the profile lookup; only that one key is rotated)"
+      description: "sdkAccessId to rotate (defaults to the most recently created key for the active env)"
     }
   }),
-  run: runWithContext<RegenArgs>(async (ctx, args, rawArgs) => {
-    const explicitId = (args.id as string | undefined)?.trim();
-    const explicitEnv: Env | undefined = isFlagPassed(rawArgs, "--env") ? ctx.env : undefined;
-
-    const target = explicitId
-      ? {env: explicitEnv ?? ctx.profile.defaultEnv ?? ("sandbox" as Env), sdkAccessId: explicitId, fromProfile: false}
-      : await resolveTargetFromProfile(ctx, explicitEnv);
+  run: runWithContext<RegenArgs>(async (ctx, args) => {
+    const sdkAccessId = (args.id as string | undefined)?.trim() || (await latestSdkAccessId(ctx.env));
+    if (!sdkAccessId) {
+      throw new AtoaError("pass the sdkAccessId to rotate (see `atoa keys list`).", "validation");
+    }
+    // Keep the rotated key under its ORIGINAL env (from the stored record), not the context default —
+    // otherwise rotating a sandbox key while the context is production would re-store it as production.
+    const existing = await findSdkKey(sdkAccessId);
+    const env = existing?.env ?? ctx.env;
 
     if (!ctx.yes) {
       const ok = await confirm({
-        message:
-          `Rotate the ${target.env} SDK key "${target.sdkAccessId}" for profile "${ctx.profileName}"?\n` +
-          `The old token stops working immediately. The new bearer is shown ONCE.`
+        message: `Rotate SDK key "${sdkAccessId}"? The old token stops working immediately; the new one is written to the key file.`
       });
       if (!ok) {
         process.stdout.write("Aborted.\n");
@@ -49,115 +40,38 @@ export default defineCommand({
       }
     }
 
-    const request = {
-      method: "POST" as const,
-      path: "/api/cli/api-access/:sdkAccessId/regenerate",
-      pathParams: {sdkAccessId: target.sdkAccessId}
-    };
-
     if (ctx.dryRun) {
-      ctx.print({...request, env: target.env});
+      ctx.print({...V1_ROUTES.apiKeys.regenerate, pathParams: {keyId: sdkAccessId}, env});
       return;
     }
 
-    const {data} = await ctx.http.request(request);
-    const token = extractBearer(data, target.env);
-    if (!token) {
-      throw new AtoaError("server response did not include a new apiSecret — nothing to store", "generic");
+    let data: unknown;
+    try {
+      const res = await ctx.http.request({...V1_ROUTES.apiKeys.regenerate, pathParams: {keyId: sdkAccessId}});
+      data = res.data;
+    } catch (err) {
+      if ((err as AtoaError).kind === "forbidden") {
+        throw new AtoaError("Regenerating a key requires an admin role.", "forbidden", {
+          status: (err as AtoaError).status,
+          requestId: (err as AtoaError).requestId
+        });
+      }
+      throw err;
     }
 
-    let stored = false;
-    if (target.fromProfile) {
-      await persistRotatedToken(ctx.profileName, target.sdkAccessId, target.env, token);
-      stored = true;
+    const apiSecret = ((data ?? {}) as {apiSecret?: string}).apiSecret;
+    if (!apiSecret) {
+      throw new AtoaError("server response did not include a new apiSecret", "generic");
     }
 
-    ctx.print({
-      profile: ctx.profileName,
-      env: target.env,
-      sdkAccessId: target.sdkAccessId,
-      token,
-      fingerprint: `…${token.slice(-4)}`,
-      storedLocally: stored
+    const savedTo = await saveSdkKey({
+      env,
+      sdkAccessId,
+      apiSecret,
+      profile: existing?.profile ?? ctx.profileName,
+      createdAt: new Date().toISOString()
     });
-
-    process.stderr.write(
-      "warning: this token is shown ONCE. Save it now if you need to copy it elsewhere (CI, another machine, …).\n"
-    );
+    ctx.print({env, sdkAccessId, apiSecret, savedTo});
+    process.stderr.write(`✓ rotated SDK key written to ${savedTo}\n`);
   })
 });
-
-/**
- * Picks the single (env, sdkAccessId) pair to operate on, asking the user to
- * choose between sandbox and production when the profile has both. Honours
- * `--env` as the explicit override. Non-TTY callers without `--env` get a
- * clear error rather than a hanging prompt.
- */
-async function resolveTargetFromProfile(
-  ctx: CommandContext,
-  explicitEnv: Env | undefined
-): Promise<{env: Env; sdkAccessId: string; fromProfile: true}> {
-  const plan = planAction(ctx.profile, "regenerate");
-  if (plan.kind === "error") throw new AtoaError(plan.message, "validation");
-
-  const env = await pickEnv(ctx, explicitEnv);
-  const state = ctx.profile.envs[env];
-  if (!state?.sdkAccessId) {
-    throw new AtoaError(
-      `no ${env} key recorded for profile "${ctx.profileName}". Re-paste via \`atoa login --env ${env}\`.`,
-      "validation"
-    );
-  }
-  return {env, sdkAccessId: state.sdkAccessId, fromProfile: true};
-}
-
-async function pickEnv(ctx: CommandContext, explicitEnv: Env | undefined): Promise<Env> {
-  if (explicitEnv) return explicitEnv;
-
-  const configured = (["sandbox", "production"] as Env[]).filter((e) => ctx.profile.envs[e]);
-  if (configured.length === 1) return configured[0];
-
-  if (!process.stdin.isTTY) {
-    throw new AtoaError(
-      `profile "${ctx.profileName}" has both sandbox and production keys — pass --env=sandbox|production to scope.`,
-      "validation"
-    );
-  }
-
-  return await select({
-    message: `Profile "${ctx.profileName}" has both envs — select which key to rotate:`,
-    choices: [
-      {value: "sandbox", name: "sandbox"},
-      {value: "production", name: "production"}
-    ],
-    default: ctx.profile.defaultEnv ?? "sandbox"
-  });
-}
-
-function extractBearer(data: unknown, env: Env): string | undefined {
-  const row = (data ?? {}) as SdkAccessRegenResponse;
-  if (env === "sandbox") return row.sandboxApiSecret ?? row.apiSecret;
-  if (env === "production") return row.productionApiSecret ?? row.apiSecret;
-  return row.apiSecret;
-}
-
-/**
- * Persist the rotated token to the keychain and refresh the profile's
- * per-env state so the fingerprint stays in sync with what's stored.
- */
-async function persistRotatedToken(profileName: string, sdkAccessId: string, env: Env, token: string): Promise<void> {
-  const store = await createSecretsStore();
-  await store.set(profileName, env, token);
-
-  const refreshed = await readProfile(profileName);
-  if (refreshed) {
-    const nextState: EnvState = {
-      sdkAccessId,
-      tokenFingerprint: fingerprintToken(token)
-    };
-    await writeProfile(profileName, {
-      ...refreshed,
-      envs: {...refreshed.envs, [env]: nextState}
-    });
-  }
-}
