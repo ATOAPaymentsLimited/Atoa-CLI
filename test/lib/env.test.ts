@@ -65,6 +65,29 @@ describe("assertSecureBaseUrl", () => {
     process.env.ATOA_ALLOW_INSECURE = "1";
     expect(() => assertSecureBaseUrl()).toThrow(/must be https/);
   });
+
+  it("rejects an https:// host that is not an Atoa domain", () => {
+    process.env.ATOA_BASE_URL = "https://evil.example";
+    delete process.env.ATOA_ALLOW_INSECURE;
+    expect(() => assertSecureBaseUrl()).toThrow(/not an Atoa domain/);
+  });
+
+  it("rejects the userinfo host-spoof https://uatapi.atoa.me@evil.example", () => {
+    process.env.ATOA_BASE_URL = "https://uatapi.atoa.me@evil.example";
+    delete process.env.ATOA_ALLOW_INSECURE;
+    expect(() => assertSecureBaseUrl()).toThrow(/not an Atoa domain/);
+  });
+
+  it("rejects the suffix host-spoof https://uatapi.atoa.me.evil.example", () => {
+    process.env.ATOA_BASE_URL = "https://uatapi.atoa.me.evil.example";
+    delete process.env.ATOA_ALLOW_INSECURE;
+    expect(() => assertSecureBaseUrl()).toThrow(/not an Atoa domain/);
+  });
+
+  it("allows an atoa.me subdomain", () => {
+    process.env.ATOA_BASE_URL = "https://uatapi.atoa.me";
+    expect(() => assertSecureBaseUrl()).not.toThrow();
+  });
 });
 
 describe("assertSecureDashboardUrl", () => {

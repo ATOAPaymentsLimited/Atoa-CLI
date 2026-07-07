@@ -20,8 +20,27 @@ export function sdkKeyFilePath(): string {
 }
 
 async function readAll(): Promise<SdkKeyRecord[]> {
+  const fp = sdkKeyFilePath();
+  let raw: string;
   try {
-    const parsed = JSON.parse(await fs.readFile(sdkKeyFilePath(), "utf8"));
+    // Refuse to read a group/other-accessible secret file (mirrors readSessionFile). The CLI
+    // always writes 0600; looser perms mean it was restored/copied without mode or tampered
+    // with, so fail loud rather than silently trust it. A missing file is fine → no keys.
+    if (process.platform !== "win32") {
+      const st = await fs.stat(fp);
+      if (st.mode & 0o077) {
+        throw new Error(
+          `Refusing to read ${fp}: insecure permissions (mode ${(st.mode & 0o777).toString(8)}). Run: chmod 600 "${fp}"`
+        );
+      }
+    }
+    raw = await fs.readFile(fp, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  try {
+    const parsed = JSON.parse(raw);
     return Array.isArray(parsed?.keys) ? (parsed.keys as SdkKeyRecord[]) : [];
   } catch {
     return [];

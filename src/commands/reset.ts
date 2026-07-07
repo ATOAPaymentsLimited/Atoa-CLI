@@ -2,8 +2,8 @@ import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
 import {unlink} from "fs/promises";
 import {configFilePath, readConfig, type EnvState} from "../lib/config-store";
-import {createSecretsStore, sessionFilePath, lockFilePath, type SecretsStore} from "../lib/secrets-store";
-import {sdkKeyFilePath} from "../lib/sdk-key-file";
+import {sessionFilePath, lockFilePath} from "../lib/secrets-store";
+import {sdkKeyFilePath, findSdkKey} from "../lib/sdk-key-file";
 import {buildHttpClient, assertTlsHardenedEnv} from "../lib/http";
 import {resolveBaseUrl} from "../lib/env";
 import {buildAuthHeader} from "../lib/auth";
@@ -88,14 +88,13 @@ export default defineCommand({
       // failing endpoint blocks the whole reset for minutes. Promise.allSettled
       // bounds the total time to the slowest single call.
       let revokedCount = 0;
-      const store = await createSecretsStore();
       if (args.revoke) {
         const jobs: Array<Promise<boolean>> = [];
         for (const [name, profile] of Object.entries(config.profiles)) {
           for (const env of ["sandbox", "production"] as Env[]) {
             const state = profile.envs[env];
             if (!state) continue;
-            jobs.push(tryRevoke(store, name, env, state));
+            jobs.push(tryRevoke(name, env, state));
           }
         }
         const results = await Promise.allSettled(jobs);
@@ -130,7 +129,7 @@ async function wipeFiles(): Promise<void> {
   }
 }
 
-async function tryRevoke(store: SecretsStore, profileName: string, env: Env, state: EnvState): Promise<boolean> {
+async function tryRevoke(profileName: string, env: Env, state: EnvState): Promise<boolean> {
   const endpoint = revokeEndpointFor(state);
   if (!endpoint) {
     process.stderr.write(
@@ -139,8 +138,14 @@ async function tryRevoke(store: SecretsStore, profileName: string, env: Env, sta
     return false;
   }
 
-  const token = await store.get(profileName, env);
-  if (!token) return false;
+  const stored = state.sdkAccessId ? await findSdkKey(state.sdkAccessId) : undefined;
+  const token = stored?.apiSecret;
+  if (!token) {
+    process.stderr.write(
+      `  skipping server revoke for ${profileName}/${env}: no stored secret for ${endpoint.label}. Revoke it from the dashboard.\n`
+    );
+    return false;
+  }
 
   try {
     assertTlsHardenedEnv();

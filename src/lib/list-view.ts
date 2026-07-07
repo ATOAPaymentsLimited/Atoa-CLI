@@ -1,5 +1,6 @@
 import type {CommandContext} from "./context";
 import type {HttpMethod, AuthMode} from "./http";
+import {stripControlChars} from "./output";
 
 /** Minimal route shape (matches V1_ROUTES entries: {method, path, auth}). */
 type Route = {method: HttpMethod; path: string; auth: AuthMode};
@@ -62,7 +63,7 @@ export async function presentList(
         pageSize: 12,
         loop: false,
         choices: [
-          ...rows.map((r, i) => ({name: line(r as Record<string, unknown>), value: i})),
+          ...rows.map((r, i) => ({name: stripControlChars(line(r as Record<string, unknown>)), value: i})),
           {name: "— Close —", value: CLOSE}
         ]
       });

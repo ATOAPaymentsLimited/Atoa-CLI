@@ -49,12 +49,10 @@ export default defineCommand({
       }
 
       const store = await createSecretsStore();
-      const [sb, prod] = await Promise.all([store.get(oldName, "sandbox"), store.get(oldName, "production")]);
+      const jwt = await store.getJwtTokens(oldName);
 
       if (args.dryRun) {
-        const slotsMoved: string[] = [];
-        if (sb) slotsMoved.push("sandbox");
-        if (prod) slotsMoved.push("production");
+        const slotsMoved: string[] = jwt ? ["session"] : [];
         process.stdout.write(
           JSON.stringify(
             {
@@ -73,7 +71,7 @@ export default defineCommand({
 
       if (!args.yes) {
         const ok = await confirm({
-          message: `Rename profile "${oldName}" → "${newName}"? Re-keys ${[sb && "sandbox", prod && "production"].filter(Boolean).join(" + ") || "0"} keychain slot(s).`,
+          message: `Rename profile "${oldName}" → "${newName}"?${jwt ? " Moves the login session." : ""}`,
           default: false
         });
         if (!ok) {
@@ -82,9 +80,8 @@ export default defineCommand({
         }
       }
 
-      // Write new slots first; old slots stay valid until step 3.
-      if (sb) await store.set(newName, "sandbox", sb);
-      if (prod) await store.set(newName, "production", prod);
+      // Move the session to the new name first; the old entry stays valid until the delete below.
+      if (jwt) await store.setJwtTokens(newName, jwt);
 
       // Update config atomically — both rename and activeProfile pointer.
       const nextProfiles = {...(cfg.profiles ?? {})};

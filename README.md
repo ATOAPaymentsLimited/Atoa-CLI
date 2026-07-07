@@ -467,7 +467,6 @@ If that prints candidates, the engine is healthy — re-run the install in a fre
 | `ATOA_PROFILE` | Default profile name. Equivalent to passing `--profile <name>` on every command; the explicit flag still wins. Useful for `export ATOA_PROFILE=ci && atoa …` long-running scripts. |
 | `ATOA_BASE_URL` | Unchanged — overrides the Atoa payment API base URL at runtime. |
 | `ATOA_DASHBOARD_URL` | Override the dashboard URL used for the browser login grant page (build define default: `https://dashboard.paywithatoa.co.uk`). Set at build time via the `DASHBOARD_URL` tsup define or at runtime via this variable. Useful for self-hosted or staging dashboard deployments. |
-| `NODE_TLS_REJECT_UNAUTHORIZED` | Setting this to `0` is **rejected at startup**. The CLI refuses to run with certificate validation disabled. Fix your proxy / CA bundle instead. |
 
 ---
 
@@ -480,7 +479,7 @@ The CLI uses POSIX-style exit codes so shell pipelines and CI systems can branch
 | `0` | Success | Command completed without error |
 | `1` | Generic failure | Anything not classified below |
 | `2` | Auth / forbidden | HTTP 401 or 403 — token invalid / revoked / lacks permission |
-| `3` | Validation error | HTTP 400 / 422, or client-side input rejected (bad amount, bad JSON, bad enum) |
+| `3` | Validation error | HTTP 400, or client-side input rejected (bad amount, bad JSON, bad enum) |
 | `4` | Not found | HTTP 404 — resource doesn't exist on this env |
 | `5` | Rate limited | HTTP 429 — back off and retry |
 | `6` | Network / TLS / DNS | Couldn't reach the server (connection refused, DNS, cert expired, timeout) |
@@ -546,9 +545,6 @@ Another `atoa` process is mid-write. If no other process is running (e.g. one cr
 ```bash
 rm ~/.atoa/auth/session.json.lock
 ```
-
-### `NODE_TLS_REJECT_UNAUTHORIZED=0 disables certificate validation and is not permitted`
-You have an env var disabling TLS verification. Unset it and re-run. If your network needs a custom CA, set `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` instead.
 
 ### `Refusing to read …/session.json: insecure permissions` (POSIX only)
 The session file got group/other read bits. Fix:

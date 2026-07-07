@@ -4,8 +4,8 @@ declare const DASHBOARD_URL: string | undefined;
 
 export type Env = "sandbox" | "production";
 
-export const PUBLIC_BASE_URL = "https://api.atoa.me";
-export const PUBLIC_DASHBOARD_URL = "https://dashboard.paywithatoa.co.uk";
+export const PUBLIC_BASE_URL = "https://uatapi.atoa.me";
+export const PUBLIC_DASHBOARD_URL = "https://uatapp.atoa.me";
 
 export function parseEnvFlag(raw: string | undefined): Env {
   if (!raw || raw === "sandbox") return "sandbox";
@@ -43,15 +43,30 @@ export function assertSecureDashboardUrl(): void {
   assertHttps("DASHBOARD_URL", resolveDashboardUrl());
 }
 
+const ALLOWED_HOSTS = ["atoa.me", "paywithatoa.co.uk"];
+const ALLOWED_HOST_SUFFIXES = [".atoa.me", ".paywithatoa.co.uk"];
+
+function isAllowedHost(url: string): boolean {
+  try {
+    if (isLoopbackHost(url)) return true;
+    const {hostname} = new URL(url);
+    return ALLOWED_HOSTS.includes(hostname) || ALLOWED_HOST_SUFFIXES.some((s) => hostname.endsWith(s));
+  } catch {
+    return false;
+  }
+}
+
 function assertHttps(label: string, url: string): void {
-  if (url.startsWith("https://")) return;
-
-  // Local-dev escape hatch (npm run dev:local). Permit http:// ONLY when explicitly
-  // opted in AND the host is loopback — so the flag can never downgrade a real remote
-  // endpoint, even if it leaks into a shell.
-  if (process.env.ATOA_ALLOW_INSECURE === "1" && isLoopbackHost(url)) return;
-
-  throw new Error(`Refusing to start: ${label}="${url}" must be https://. Rebuild with an https:// ${label}.`);
+  if (!url.startsWith("https://")) {
+    if (process.env.ATOA_ALLOW_INSECURE === "1" && isLoopbackHost(url)) return;
+    throw new Error(`Refusing to start: ${label}="${url}" must be https://. Rebuild with an https:// ${label}.`);
+  }
+  // https:// must additionally target an Atoa-controlled host (or loopback), so an overridden
+  // BASE_URL/DASHBOARD_URL can't exfiltrate credentials to an arbitrary server. This also blocks
+  // host tricks like "api.atoa.me@evil.example" (host=evil.example) and "...atoa.me.evil.example".
+  if (!isAllowedHost(url)) {
+    throw new Error(`Refusing to start: ${label}="${url}" host is not an Atoa domain`);
+  }
 }
 
 function isLoopbackHost(raw: string): boolean {

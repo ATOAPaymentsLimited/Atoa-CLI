@@ -131,6 +131,16 @@ export function buildHttpClient(opts: {
     }
 
     const url = new URL(opts.baseUrl + path);
+    // Confine the request to the configured API origin. `path` is concatenated straight onto
+    // baseUrl, so a value like "@evil.com/x" or ".evil.com/x" parses to a DIFFERENT host —
+    // silently sending the request (and any attached credential/body) to an attacker. Reject
+    // anything that resolves off-origin; legitimate paths begin with "/".
+    if (url.origin !== new URL(opts.baseUrl).origin) {
+      throw new AtoaError(
+        `Refusing to send request off-origin: "${reqOpts.path}" resolves to ${url.origin}, not ${new URL(opts.baseUrl).origin}. A request path must begin with "/".`,
+        "validation"
+      );
+    }
     if (reqOpts.query) {
       for (const [k, v] of Object.entries(reqOpts.query)) {
         if (v !== undefined) url.searchParams.set(k, String(v));

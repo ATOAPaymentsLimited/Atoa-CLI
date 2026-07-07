@@ -246,11 +246,11 @@ describe("login (browser PKCE flow)", () => {
   });
 
   it("honours a runtime ATOA_DASHBOARD_URL override for the grant URL", async () => {
-    process.env.ATOA_DASHBOARD_URL = "https://dashboard.atoa.dev";
+    process.env.ATOA_DASHBOARD_URL = "https://dashboard.paywithatoa.co.uk";
     try {
       queueSingleBusinessLogin();
       await (login.run as any)({args: {env: "sandbox"}, rawArgs: []});
-      expect(new URL(state.browser.urls[0]).origin).toBe("https://dashboard.atoa.dev");
+      expect(new URL(state.browser.urls[0]).origin).toBe("https://dashboard.paywithatoa.co.uk");
     } finally {
       delete process.env.ATOA_DASHBOARD_URL;
     }

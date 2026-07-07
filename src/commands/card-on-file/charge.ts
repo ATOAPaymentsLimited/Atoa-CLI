@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {confirm} from "@inquirer/prompts";
 import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 
@@ -63,6 +64,26 @@ export default defineCommand({
     if (ctx.dryRun) {
       ctx.print({method: "POST", path, body, idempotencyKey: args.idempotencyKey ?? "(auto-generated UUIDv4)"});
       return;
+    }
+
+    // Immediate, irreversible debit — confirm like every other money command (capture/cancel/
+    // refund) instead of charging on a bare invocation. Guard non-interactive shells so it can't
+    // hang or be driven blind; --yes is the explicit opt-out for scripts.
+    if (!ctx.yes) {
+      if (!process.stdout.isTTY) {
+        throw new AtoaError(
+          "Refusing to charge without confirmation in a non-interactive shell — re-run with --yes.",
+          "validation"
+        );
+      }
+      const ok = await confirm({
+        message: `Charge £${amount.toFixed(2)} to card ${args.paymentMethodId} now (${captureType})? This cannot be undone.`,
+        default: false
+      });
+      if (!ok) {
+        process.stdout.write("Aborted.\n");
+        return;
+      }
     }
 
     const {data} = await ctx.http.request({
