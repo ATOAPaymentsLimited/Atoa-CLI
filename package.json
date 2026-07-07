@@ -1,6 +1,6 @@
 {
   "name": "@atoapayments/atoa-cli",
-  "version": "0.2.7",
+  "version": "0.2.14",
   "description": "First-party CLI for the Atoa payment API.",
   "license": "MIT",
   "private": false,
@@ -32,7 +32,7 @@
     "test": "vitest run --coverage",
     "test:unit": "vitest run test/lib test/commands",
     "test:e2e": "cross-env ATOA_CLI_E2E=1 vitest run test/integration",
-    "gen:logo": "node scripts/gen-logo.mjs"
+    "gen:logo": "node scripts/gen-logo.mjs && prettier --write src/lib/atoa-logo.ts"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
