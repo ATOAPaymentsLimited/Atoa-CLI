@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atoa CLI — macOS Signing & Notarization Setup</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #5a6270; --border: #e2e5ea;
+    --card: #f7f8fa; --accent: #c8102e; --code-bg: #f2f3f5; --code-fg: #1a1a1a;
+    --warn-bg: #fff6e5; --warn-border: #f0b429; --ok-bg: #e8f6ec; --ok-border: #34a853;
+    --info-bg: #e8f0fe; --info-border: #4285f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c; --fg: #e6e8eb; --muted: #9aa3b0; --border: #2a2f38;
+      --card: #1b1f26; --accent: #ff6b7f; --code-bg: #1e232b; --code-fg: #e6e8eb;
+      --warn-bg: #3a2f14; --warn-border: #f0b429; --ok-bg: #16301f; --ok-border: #34a853;
+      --info-bg: #16233a; --info-border: #4285f4;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 40px 24px 96px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 22px; margin: 44px 0 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 26px 0 8px; }
+  p, li { color: var(--fg); }
+  .lede { color: var(--muted); font-size: 17px; margin: 0 0 8px; }
+  code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+  code { background: var(--code-bg); color: var(--code-fg); padding: 2px 6px; border-radius: 5px; }
+  kbd { background: var(--card); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font-size: 0.85em; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  a { color: var(--accent); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+         color: #fff; background: var(--accent); padding: 3px 9px; border-radius: 999px; vertical-align: middle; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .callout { border-radius: 10px; padding: 12px 16px; margin: 16px 0; border: 1px solid var(--border); }
+  .callout p { margin: 6px 0; }
+  .callout strong:first-child { display: block; margin-bottom: 4px; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-border); }
+  .ok   { background: var(--ok-bg);   border-color: var(--ok-border); }
+  .info { background: var(--info-bg); border-color: var(--info-border); }
+  .step { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px 20px 16px; margin: 18px 0; }
+  .step h3 { display: flex; align-items: center; gap: 10px; }
+  .num { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff;
+         display: inline-flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; }
+  ol.tight, ul.tight { padding-left: 22px; }
+  ol.tight li, ul.tight li { margin: 6px 0; }
+  .chk { font-weight: 600; }
+  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 20px; }
+  .toc ol { margin: 6px 0; padding-left: 22px; }
+  .meta { color: var(--muted); font-size: 13.5px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p><span class="tag">Internal runbook</span></p>
+  <h1>Atoa CLI — macOS Code Signing &amp; Notarization Setup</h1>
+  <p class="lede">One-time setup of the Apple credentials needed to ship signed, notarized macOS
+  binaries of the <code>atoa</code> CLI. Follow this on the <strong>company Mac Mini</strong>.</p>
+  <p class="meta">Audience: any engineer. No prior Apple-signing experience assumed. Steps verified
+  against Apple’s current documentation (notarization uses <code>notarytool</code>; the retired
+  <code>altool</code> notarization path is <em>not</em> used).</p>
+
+  <div class="callout info">
+    <strong>What you’re producing</strong>
+    <p>By the end you’ll have added <strong>6 secrets</strong> to the GitHub repo. That’s the whole
+    goal — the CI workflows already know how to use them.</p>
+    <table>
+      <tr><th>GitHub secret</th><th>What it is</th><th>Created in</th></tr>
+      <tr><td><code>APPLE_CERT_P12_BASE64</code></td><td>Developer ID Application cert + private key, base64-encoded</td><td>Steps 1–5</td></tr>
+      <tr><td><code>APPLE_CERT_PASSWORD</code></td><td>Password you set when exporting the <code>.p12</code></td><td>Step 4</td></tr>
+      <tr><td><code>APPLE_SIGN_IDENTITY</code></td><td>The certificate’s full name string</td><td>Step 3</td></tr>
+      <tr><td><code>APPLE_API_KEY_ID</code></td><td>App Store Connect API key ID (for notarization)</td><td>Step 6</td></tr>
+      <tr><td><code>APPLE_API_ISSUER_ID</code></td><td>App Store Connect API issuer ID</td><td>Step 6</td></tr>
+      <tr><td><code>APPLE_API_KEY_P8_BASE64</code></td><td>The API key <code>.p8</code> file, base64-encoded</td><td>Steps 6–7</td></tr>
+    </table>
+  </div>
+
+  <div class="toc">
+    <strong>Steps</strong>
+    <ol>
+      <li>Prerequisites &amp; access</li>
+      <li>Step 1 — Create a Certificate Signing Request (CSR) on the Mac Mini</li>
+      <li>Step 2 — Create the Developer ID Application certificate (Apple portal)</li>
+      <li>Step 3 — Install the certificate &amp; read the signing identity</li>
+      <li>Step 4 — Export the certificate as a <code>.p12</code></li>
+      <li>Step 5 — Base64-encode the <code>.p12</code></li>
+      <li>Step 6 — Create an App Store Connect API key (for notarization)</li>
+      <li>Step 7 — Base64-encode the <code>.p8</code></li>
+      <li>Step 8 — Add the 6 secrets to GitHub</li>
+      <li>Step 9 — What happens next (testing on UAT)</li>
+      <li>Concepts &amp; safety notes</li>
+    </ol>
+  </div>
+
+  <h2>0 · Prerequisites &amp; access</h2>
+  <ul class="tight">
+    <li><strong>The company Mac Mini</strong>, logged in as a user you can access. You’ll create a key
+      in its login Keychain, so do Steps 1–5 <em>on that same machine</em>.</li>
+    <li><strong>Apple Developer account access.</strong> Atoa’s team already exists — Team ID
+      <code>93322BSZUH</code> (“Atoa Payments Ltd”). You need to sign in at
+      <a href="https://developer.apple.com/account">developer.apple.com/account</a>.</li>
+    <li><strong>Roles matter (this trips people up):</strong>
+      <ul class="tight">
+        <li>Creating the <em>Developer ID certificate</em> (Step 2) requires the
+          <strong>Account Holder</strong> role. Admin is <em>not</em> enough for this specific cert type.</li>
+        <li>Creating the <em>App Store Connect API key</em> (Step 6) requires <strong>Account Holder
+          or Admin</strong>.</li>
+      </ul>
+      If you don’t have Account Holder, find who does before starting Step 2.</li>
+    <li>Xcode Command Line Tools installed (for <code>codesign</code> / <code>notarytool</code> checks).
+      If <code>xcrun notarytool --help</code> errors, run <code>xcode-select --install</code> first.</li>
+  </ul>
+  <div class="callout warn">
+    <strong>Limit to know about</strong>
+    <p>Apple allows a maximum of <strong>5 Developer ID Application certificates</strong> per account.
+    Don’t create extras “to test” — reuse the shared one. If the portal already shows a
+    “Developer ID Application: Atoa Payments Ltd” cert and someone has its <code>.p12</code>, you can
+    skip Steps 1–4 and just get that file.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">1</span> Create a Certificate Signing Request (CSR)</h3>
+    <p class="meta">On the Mac Mini. This generates the private key (in the login Keychain) and a
+    request file you upload to Apple.</p>
+    <ol class="tight">
+      <li>Open <strong>Keychain Access</strong> (in <code>/Applications/Utilities</code>, or Spotlight-search it).</li>
+      <li>Menu bar: <strong>Keychain Access ▸ Certificate Assistant ▸ Request a Certificate From a Certificate Authority…</strong></li>
+      <li>Fill the dialog:
+        <ul class="tight">
+          <li><strong>User Email Address:</strong> your Atoa email.</li>
+          <li><strong>Common Name:</strong> something identifiable, e.g. <code>Atoa Developer ID</code>.</li>
+          <li><strong>CA Email Address:</strong> leave <em>empty</em>.</li>
+          <li>Select <strong>“Saved to disk”</strong>.</li>
+        </ul>
+      </li>
+      <li>Click <strong>Continue</strong> and save the file (e.g. to the Desktop). You’ll get a
+        <code>CertificateSigningRequest.certSigningRequest</code> file.</li>
+    </ol>
+    <p class="chk">✅ Checkpoint: a <code>.certSigningRequest</code> file exists, and Keychain Access ▸
+      <strong>login ▸ Keys</strong> now shows a new private key with the Common Name you chose.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">2</span> Create the Developer ID Application certificate</h3>
+    <p class="meta">In the Apple Developer portal (any browser, but stay on the Mac Mini so the next
+    steps line up).</p>
+    <ol class="tight">
+      <li>Go to <a href="https://developer.apple.com/account/resources/certificates/list">Certificates, Identifiers &amp; Profiles ▸ Certificates</a>.</li>
+      <li>Click the <strong>+</strong> (add) button, top-left.</li>
+      <li>Under the <strong>Software</strong> section choose <strong>Developer ID</strong>, then
+        <strong>Continue</strong>. When prompted for the type, pick
+        <strong>Developer ID Application</strong> (this signs a Mac app/binary; “Developer ID Installer”
+        is only for <code>.pkg</code> installers — not what we want).</li>
+      <li>Click <strong>Choose File</strong> and select the <code>.certSigningRequest</code> from Step 1,
+        then <strong>Continue</strong>.</li>
+      <li>Click <strong>Download</strong>. A <code>.cer</code> file lands in your <code>Downloads</code> folder.</li>
+    </ol>
+    <p class="chk">✅ Checkpoint: you have a <code>developerID_application.cer</code> (name may vary) in Downloads.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">3</span> Install the cert &amp; read the signing identity</h3>
+    <ol class="tight">
+      <li><strong>Double-click</strong> the downloaded <code>.cer</code>. It installs into the login
+        Keychain and pairs with the private key from Step 1.</li>
+      <li>In Terminal, run:
+        <pre><code>security find-identity -v -p codesigning</code></pre>
+      </li>
+      <li>Find the line that reads <code>Developer ID Application: Atoa Payments Ltd (93322BSZUH)</code>.
+        Copy that <strong>full quoted string</strong> — it is your <code>APPLE_SIGN_IDENTITY</code>.</li>
+    </ol>
+    <div class="callout info">
+      <strong>Where’s the Team ID?</strong>
+      <p>It’s the <code>93322BSZUH</code> inside the identity string. Our workflow reads the team from
+      that string, so there’s no separate Team ID secret to add.</p>
+    </div>
+    <p class="chk">✅ Checkpoint: <code>find-identity</code> lists exactly one
+      “Developer ID Application: Atoa Payments Ltd …” entry (not “Apple Development” — that’s the wrong type).</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">4</span> Export the certificate as a <code>.p12</code></h3>
+    <p class="meta">This bundles the certificate <em>and its private key</em> into one portable file.</p>
+    <ol class="tight">
+      <li>In <strong>Keychain Access ▸ login ▸ My Certificates</strong>, find
+        <strong>Developer ID Application: Atoa Payments Ltd</strong>. Click the ▸ triangle — you should
+        see a private key nested under it. (If there’s no nested key, the export won’t work — recheck Step 1/3.)</li>
+      <li>Right-click the certificate ▸ <strong>Export “Developer ID Application: …”</strong>.</li>
+      <li>Save as <strong>Personal Information Exchange (.p12)</strong>, e.g. <code>atoa-developer-id.p12</code>.</li>
+      <li>Set a <strong>strong password</strong> when prompted. <em>Write it down</em> — this is your
+        <code>APPLE_CERT_PASSWORD</code>.</li>
+      <li>macOS may ask for your login password to allow the export — that’s expected; approve it.</li>
+    </ol>
+    <p class="chk">✅ Checkpoint: an <code>atoa-developer-id.p12</code> file exists and you know its password.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">5</span> Base64-encode the <code>.p12</code></h3>
+    <p class="meta">GitHub secrets are text, so binary files must be base64-encoded first.</p>
+    <pre><code>base64 -i atoa-developer-id.p12 | pbcopy</code></pre>
+    <p>This copies the encoded text to your clipboard — it becomes <code>APPLE_CERT_P12_BASE64</code> in
+    Step 8. (To verify it worked: <code>base64 -i atoa-developer-id.p12 | wc -c</code> should print a
+    few thousand characters.)</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">6</span> Create an App Store Connect API key (for notarization)</h3>
+    <p class="meta"><code>notarytool</code> submits the binary to Apple and waits for approval. It
+    authenticates with an API key — not a password.</p>
+    <ol class="tight">
+      <li>Go to <a href="https://appstoreconnect.apple.com/access/integrations/api">App Store Connect ▸ Users and Access ▸ Integrations ▸ App Store Connect API</a>.</li>
+      <li>Make sure you’re on the <strong>Team Keys</strong> tab (<em>not</em> “Individual/Personal Keys”).
+        <strong>Personal keys do not work for notarization.</strong></li>
+      <li>Click <strong>+</strong> (Generate API Key). Name it e.g. <code>atoa-cli-notary</code>, and set
+        <strong>Access: Developer</strong> (sufficient for notarization).</li>
+      <li>After it’s created, note two values on the page:
+        <ul class="tight">
+          <li>the key’s <strong>Key ID</strong> (a 10-character code) → <code>APPLE_API_KEY_ID</code></li>
+          <li>the <strong>Issuer ID</strong> shown at the top of the keys list (a UUID) → <code>APPLE_API_ISSUER_ID</code></li>
+        </ul>
+      </li>
+      <li>Click <strong>Download API Key</strong> to get the <code>AuthKey_XXXXXXXXXX.p8</code> file.</li>
+    </ol>
+    <div class="callout warn">
+      <strong>You can only download the <code>.p8</code> once</strong>
+      <p>Apple never lets you re-download it. Save it immediately into the team password manager. If it’s
+      lost, you must revoke the key and make a new one.</p>
+    </div>
+    <p class="chk">✅ Checkpoint: you have the <code>.p8</code> file, the Key ID, and the Issuer ID.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">7</span> Base64-encode the <code>.p8</code></h3>
+    <pre><code>base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy</code></pre>
+    <p>The clipboard now holds <code>APPLE_API_KEY_P8_BASE64</code> for Step 8.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">8</span> Add the 6 secrets to GitHub</h3>
+    <ol class="tight">
+      <li>In the repo on GitHub: <strong>Settings ▸ Environments ▸ <code>UAT</code></strong>
+        (this is where <code>GPG_*</code> and <code>AZURE_*</code> already live, so the UAT build can read them).</li>
+      <li>Under <strong>Environment secrets</strong>, click <strong>Add secret</strong> for each of the six,
+        using the <em>exact</em> names below:</li>
+    </ol>
+    <table>
+      <tr><th>Name</th><th>Value</th></tr>
+      <tr><td><code>APPLE_CERT_P12_BASE64</code></td><td>base64 from Step 5</td></tr>
+      <tr><td><code>APPLE_CERT_PASSWORD</code></td><td>the <code>.p12</code> password from Step 4</td></tr>
+      <tr><td><code>APPLE_SIGN_IDENTITY</code></td><td><code>Developer ID Application: Atoa Payments Ltd (93322BSZUH)</code></td></tr>
+      <tr><td><code>APPLE_API_KEY_ID</code></td><td>Key ID from Step 6</td></tr>
+      <tr><td><code>APPLE_API_ISSUER_ID</code></td><td>Issuer ID from Step 6</td></tr>
+      <tr><td><code>APPLE_API_KEY_P8_BASE64</code></td><td>base64 from Step 7</td></tr>
+    </table>
+    <div class="callout info">
+      <strong>Why the UAT environment?</strong>
+      <p>So we can test the whole signing + notarization chain on a <code>hotfix/*</code> build before
+      anything reaches <code>main</code>. When you later ship from PROD, the same secrets can be copied to a
+      <code>production</code> environment.</p>
+    </div>
+    <p class="chk">✅ Checkpoint: the <code>UAT</code> environment lists all six Apple secrets.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">9</span> What happens next — testing on UAT</h3>
+    <p>Once the six secrets exist, hand back to the CLI/CI owner. They will:</p>
+    <ol class="tight">
+      <li>Add <strong>codesign + notarize</strong> steps to the macOS UAT workflow
+        (<code>macos-build-uat.yml</code>), which currently builds unsigned.</li>
+      <li>Push to a <code>hotfix/*</code> branch → the workflow builds, <strong>signs</strong>, and
+        <strong>notarizes</strong> the Mac binary and uploads it as an artifact.</li>
+      <li>On the Mac Mini, download the artifact and verify it passes Gatekeeper:
+        <pre><code>codesign --verify --strict --verbose=2 ./atoa-darwin-arm64
+spctl -a -vvv -t exec ./atoa-darwin-arm64   # after adding a quarantine flag, see note below</code></pre>
+      </li>
+    </ol>
+    <div class="callout info">
+      <strong>Why <code>spctl</code> may say “rejected” on a local file</strong>
+      <p>A binary you built/downloaded locally has no <code>com.apple.quarantine</code> flag, so
+      <code>spctl</code> falls back to an offline check that doesn’t recognise bare CLI binaries and prints
+      “rejected”. That is <em>not</em> a real failure. The authoritative signal is that
+      <code>notarytool submit</code> returned <strong>Accepted</strong>. To simulate a real download:</p>
+      <pre><code>cp atoa-darwin-arm64 /tmp/atoa-test
+xattr -w com.apple.quarantine "0083;0;test;" /tmp/atoa-test
+spctl -a -vvv -t exec /tmp/atoa-test</code></pre>
+    </div>
+  </div>
+
+  <h2>Concepts &amp; safety notes</h2>
+  <ul class="tight">
+    <li><strong>Signing vs notarization.</strong> <em>Codesigning</em> stamps the binary with Atoa’s
+      Developer ID (fast, local). <em>Notarization</em> uploads it to Apple for a malware scan and a
+      ticket (slower, online). End users’ Gatekeeper trusts a notarized binary.</li>
+    <li><strong>Bare CLI binaries can’t be “stapled.”</strong> Stapling (attaching the ticket to the file)
+      only works for <code>.app</code>/<code>.pkg</code>/<code>.dmg</code>. For a plain binary, Gatekeeper
+      checks Apple’s servers online on first run — this is normal and how <code>gh</code>, <code>deno</code>,
+      etc. work. Our installer also strips the quarantine flag, so <code>curl | sh</code> installs are seamless.</li>
+    <li><strong>The cert is NOT tied to this Mac.</strong> It belongs to the Atoa team account. The
+      <code>.p12</code> is portable — that’s why CI can import it into a throwaway keychain. After Step 5 you
+      could wipe it from the Mac Mini entirely; the vault + GitHub copy are the source of truth.</li>
+    <li><strong>Guard the <code>.p12</code> + password and the <code>.p8</code> like signing keys.</strong>
+      Anyone with them can sign or notarize software <em>as Atoa</em>. Store them only in the team password
+      manager and GitHub Secrets — never in Slack, email, or a plain repo file.</li>
+    <li><strong>Rotation.</strong> If a key leaks or the holder leaves, revoke it in the portal and generate a
+      replacement. Because these are team-level assets, that doesn’t depend on any one device.</li>
+  </ul>
+
+  <hr>
+  <p class="meta">Secret names in this guide match the macOS job in
+  <code>.github/workflows/release-binaries.yml</code>. If those names change, update this doc.</p>
+
+</div>
+</body>
+</html>

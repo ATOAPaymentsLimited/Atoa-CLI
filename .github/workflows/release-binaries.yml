@@ -5,7 +5,7 @@
 # then a single `publish` job attaches everything to one public GitHub Release.
 # That release is the only channel scripts/install.sh and scripts/install.ps1
 # pull from. This is separate from release.yml (npm) and from the branch-
-# triggered UAT builds (linux-build.yml / windows-build.yml).
+# triggered UAT builds (linux-build-uat.yml / windows-build-uat.yml).
 #
 #   git tag v0.1.2 && git push origin v0.1.2
 #
@@ -47,12 +47,9 @@ jobs:
       - name: Package Linux x64 binary
         run: npx @yao-pkg/pkg . --targets node20-linux-x64 --output dist/atoa-linux-x64
 
-      - name: Fetch arm64 native keyring binding
-        # npm ci above only installs the x64 build of @napi-rs/keyring's native
-        # module. The arm64 target needs its own prebuilt .node binding pulled in
-        # so pkg's asset glob (see package.json "pkg.assets") can bundle it.
-        run: npm install --no-save --force @napi-rs/keyring-linux-arm64-gnu
-
+      # Credentials are stored in a plain file (no @napi-rs/keyring native
+      # module as of v0.2.0), so the bundle is pure JS and arm64 cross-builds
+      # on the x64 runner with no extra native binding to fetch.
       - name: Package Linux arm64 binary
         run: npx @yao-pkg/pkg . --targets node20-linux-arm64 --output dist/atoa-linux-arm64
 
@@ -141,12 +138,9 @@ jobs:
   #     - name: Package macOS arm64 binary
   #       run: npx @yao-pkg/pkg . --targets node20-macos-arm64 --output dist/atoa-darwin-arm64
   #
-  #     - name: Fetch x64 native keyring binding
-  #       # The macos-latest runner is arm64, so npm ci only installs the arm64
-  #       # native module; the x64 target needs its own prebuilt .node binding.
-  #       run: npm install --no-save --force @napi-rs/keyring-darwin-x64
-  #
   #     - name: Package macOS x64 binary
+  #       # No native module as of v0.2.0, so x64 cross-builds on the arm64 runner
+  #       # with no extra binding to fetch.
   #       run: npx @yao-pkg/pkg . --targets node20-macos-x64 --output dist/atoa-darwin-x64
   #
   #     - name: Import Apple signing certificate

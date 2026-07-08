@@ -1,0 +1,1 @@
+export const DEFAULT_PHONE_COUNTRY_CODE = "44";

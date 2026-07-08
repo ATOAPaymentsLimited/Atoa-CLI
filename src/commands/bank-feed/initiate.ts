@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type InitiateArgs = CommonOptions & {
   redirectUrl?: string;
@@ -16,7 +16,7 @@ export default defineCommand({
         "custom data appended to the redirect URL as a query param, useful for tracking your own session or order ID through the bank-feed flow"
     }
   }),
-  run: runWithContext<InitiateArgs>(async (ctx, args) => {
+  run: runWithSdkKey<InitiateArgs>(async (ctx, args) => {
     const body = {
       redirectUrl: args.redirectUrl as string,
       ...(args.callbackParams && {callbackParams: args.callbackParams})

@@ -1,0 +1,57 @@
+name: Windows Build UAT
+
+on:
+  push:
+    branches:
+      - 'hotfix/*'
+      - 'release/*'
+
+jobs:
+  build-and-sign:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package Windows binary
+        run: npx @yao-pkg/pkg . --targets node20-win-x64 --output dist/atoa.exe
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Sign Windows binary
+        uses: azure/artifact-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: AtoaCLI
+          certificate-profile-name: atoa-cert-profile
+          files-folder: dist/
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Compute artifact name
+        shell: bash
+        run: echo "ARTIFACT_NAME=atoa-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/atoa.exe
+          retention-days: 30

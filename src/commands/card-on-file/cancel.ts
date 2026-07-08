@@ -1,6 +1,6 @@
 import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type CancelArgs = CommonOptions & {
   id?: string;
@@ -21,7 +21,7 @@ export default defineCommand({
       description: "cancelledReasonDescription (free text; required when --reasonCode=Other)"
     }
   }),
-  run: runWithContext<CancelArgs>(async (ctx, args) => {
+  run: runWithSdkKey<CancelArgs>(async (ctx, args) => {
     const id = args.id as string;
     const path = `/api/payments/card/payment-request/${encodeURIComponent(id)}/cancel`;
     const body = {

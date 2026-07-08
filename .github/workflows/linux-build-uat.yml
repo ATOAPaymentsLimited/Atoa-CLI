@@ -1,0 +1,69 @@
+name: Linux Build UAT
+
+on:
+  push:
+    branches:
+      - 'hotfix/*'
+      - 'release/*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-sign:
+    runs-on: ubuntu-latest
+    environment: UAT
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package Linux x64 binary
+        run: npx @yao-pkg/pkg . --targets node20-linux-x64 --output dist/atoa-linux-x64
+
+      # Credentials are stored in a plain file (no @napi-rs/keyring native
+      # module as of v0.2.0), so the bundle is pure JS and arm64 cross-builds
+      # on the x64 runner with no extra native binding to fetch.
+      - name: Package Linux arm64 binary
+        run: npx @yao-pkg/pkg . --targets node20-linux-arm64 --output dist/atoa-linux-arm64
+
+      - name: Make binaries executable
+        run: chmod +x dist/atoa-linux-x64 dist/atoa-linux-arm64
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum atoa-linux-x64 atoa-linux-arm64 > SHA256SUMS
+
+      - name: Import GPG key
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign checksums
+        working-directory: dist
+        run: |
+          gpg --batch --yes \
+            --local-user "${{ secrets.GPG_KEY_ID }}" \
+            --output SHA256SUMS.asc --detach-sign --armor SHA256SUMS
+
+      - name: Compute artifact name
+        shell: bash
+        run: echo "ARTIFACT_NAME=atoa-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/atoa-linux-x64
+            dist/atoa-linux-arm64
+            dist/SHA256SUMS
+            dist/SHA256SUMS.asc
+          retention-days: 30
