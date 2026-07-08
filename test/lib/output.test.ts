@@ -1,5 +1,21 @@
 import {describe, it, expect, vi} from "vitest";
-import {resolveFormat, print} from "../../src/lib/output";
+import {resolveFormat, print, stripControlChars} from "../../src/lib/output";
+
+describe("stripControlChars", () => {
+  it("strips ANSI/OSC escape introducers and other control chars from server data", () => {
+    const ESC = String.fromCharCode(27); // 0x1b
+    const BEL = String.fromCharCode(7); // 0x07
+    const NUL = String.fromCharCode(0); // 0x00
+    const evil = ESC + "[2K" + ESC + "[1AInjected" + BEL + " name" + NUL;
+    expect(evil).not.toBe(stripControlChars(evil)); // sanity: input really had control chars
+    // ESC/BEL/NUL removed; the now-inert bracket text remains as literal characters.
+    expect(stripControlChars(evil)).toBe("[2K[1AInjected name");
+  });
+
+  it("leaves ordinary text (including unicode) untouched", () => {
+    expect(stripControlChars("Acme Café £10")).toBe("Acme Café £10");
+  });
+});
 
 describe("resolveFormat", () => {
   it("accepts json", () => expect(resolveFormat("json")).toBe("json"));

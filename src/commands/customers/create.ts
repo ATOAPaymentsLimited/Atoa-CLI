@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runProdSdkKey, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 
 type CreateArgs = CommonOptions & {
@@ -30,7 +30,7 @@ export default defineCommand({
     postcode: {type: "string", description: "postal code"},
     vatNumber: {type: "string", description: "VAT registration number (business customers)"}
   }),
-  run: runWithContext<CreateArgs>(async (ctx, args) => {
+  run: runProdSdkKey<CreateArgs>(async (ctx, args) => {
     if (!args.email && !args.phoneNumber) {
       throw new AtoaError("either --email or --phoneNumber is required", "validation");
     }

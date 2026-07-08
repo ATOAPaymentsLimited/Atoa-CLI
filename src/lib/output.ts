@@ -33,6 +33,23 @@ function colorizeJson(data: unknown): string {
   });
 }
 
+/** True when output should be human-rendered: a TTY with no explicit --output. */
+export function isInteractive(formatExplicit: boolean): boolean {
+  return Boolean(process.stdout.isTTY) && !formatExplicit;
+}
+
+/**
+ * Renders a heading followed by aligned "  Label  value" rows for a flat record.
+ * Rows with empty/undefined values are dropped, so callers can list every possible
+ * field and only the set ones show. Used by the CLI-authored summary commands
+ * (whoami, signup, …) for their human view; scripting still gets the raw object.
+ */
+export function renderKeyValues(heading: string, rows: Array<[string, string | undefined]>): string {
+  const present = rows.filter((r): r is [string, string] => Boolean(r[1]));
+  const pad = present.length ? Math.max(...present.map(([k]) => k.length)) : 0;
+  return [heading, "", ...present.map(([k, v]) => `  ${k.padEnd(pad)}  ${v}`)].join("\n");
+}
+
 export function resolveFormat(requested: string | undefined): OutputFormat {
   if (requested === "json" || requested === "table" || requested === "yaml") return requested;
   if (requested) throw new Error(`Invalid --output value '${requested}'. Use json|table|yaml.`);
@@ -59,10 +76,10 @@ function renderTable(data: unknown): string {
     if (data.length === 0) return "(no rows)";
     const first = data[0];
     if (typeof first !== "object" || first === null) {
-      return data.map((v) => String(v)).join("\n");
+      return data.map((v) => stripControlChars(String(v))).join("\n");
     }
     const cols = Object.keys(first as object);
-    const t = new Table({head: cols});
+    const t = new Table({head: cols.map(stripControlChars)});
     for (const row of data as Array<Record<string, unknown>>) {
       t.push(cols.map((c) => stringify(row[c])));
     }
@@ -75,11 +92,23 @@ function renderTable(data: unknown): string {
     }
     return t.toString();
   }
-  return String(data);
+  return stripControlChars(String(data));
+}
+
+export function stripControlChars(s: string): string {
+  // Drop C0 (0x00–0x1F, incl. ESC), DEL (0x7F), and C1 (0x80–0x9F) control chars — code-point
+  // loop avoids putting literal control bytes or a no-control-regex in the source.
+  let out = "";
+  for (const ch of s) {
+    const c = ch.codePointAt(0) as number;
+    if (c <= 0x1f || (c >= 0x7f && c <= 0x9f)) continue;
+    out += ch;
+  }
+  return out;
 }
 
 function stringify(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
+  return stripControlChars(String(v));
 }

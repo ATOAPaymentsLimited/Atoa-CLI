@@ -34,7 +34,7 @@ const mock = vi.hoisted(() => {
 
 vi.mock("../../src/lib/context", async () => {
   const actual = await vi.importActual<any>("../../src/lib/context");
-  return {...actual, buildContext: mock.buildContext};
+  return {...actual, buildSdkContext: mock.buildContext};
 });
 
 import create from "../../src/commands/webhooks/create";

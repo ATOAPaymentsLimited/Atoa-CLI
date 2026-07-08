@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import type {CommandContext} from "../../lib/context";
 import {AtoaError} from "../../lib/errors";
 
@@ -35,7 +35,7 @@ export default defineCommand({
     id: {type: "positional", required: true, description: "payment request ID"},
     poll: {type: "boolean", description: "poll every 5 s until non-PENDING (max 3 min)"}
   }),
-  run: runWithContext<StatusArgs>(async (ctx, args) => {
+  run: runWithSdkKey<StatusArgs>(async (ctx, args) => {
     const path = `/api/payments/v1/payment-status/${encodeURIComponent(args.id as string)}`;
     const query: Record<string, string> = {env: ctx.env};
 

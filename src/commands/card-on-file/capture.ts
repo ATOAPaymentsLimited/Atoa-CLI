@@ -1,6 +1,6 @@
 import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type CaptureArgs = CommonOptions & {id?: string};
 
@@ -9,7 +9,7 @@ export default defineCommand({
   args: withCommonArgs({
     id: {type: "positional", required: true, description: "paymentRequestId from prior charge"}
   }),
-  run: runWithContext<CaptureArgs>(async (ctx, args) => {
+  run: runWithSdkKey<CaptureArgs>(async (ctx, args) => {
     const id = args.id as string;
     const path = `/api/payments/card/payment-request/${encodeURIComponent(id)}/capture`;
 

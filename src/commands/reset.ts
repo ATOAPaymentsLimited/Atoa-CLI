@@ -2,7 +2,8 @@ import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
 import {unlink} from "fs/promises";
 import {configFilePath, readConfig, type EnvState} from "../lib/config-store";
-import {createSecretsStore, secretsFilePath, type SecretsStore} from "../lib/secrets-store";
+import {sessionFilePath, lockFilePath} from "../lib/secrets-store";
+import {sdkKeyFilePath, findSdkKey} from "../lib/sdk-key-file";
 import {buildHttpClient, assertTlsHardenedEnv} from "../lib/http";
 import {resolveBaseUrl} from "../lib/env";
 import {buildAuthHeader} from "../lib/auth";
@@ -54,7 +55,7 @@ export default defineCommand({
             {
               action: "reset",
               willClearProfiles: profileNames,
-              willWipeFiles: [configFilePath(), secretsFilePath()],
+              willWipeFiles: [configFilePath(), sessionFilePath(), sdkKeyFilePath()],
               willRevoke: args.revoke ? targets : []
             },
             null,
@@ -87,26 +88,23 @@ export default defineCommand({
       // failing endpoint blocks the whole reset for minutes. Promise.allSettled
       // bounds the total time to the slowest single call.
       let revokedCount = 0;
-      const store = await createSecretsStore();
       if (args.revoke) {
         const jobs: Array<Promise<boolean>> = [];
         for (const [name, profile] of Object.entries(config.profiles)) {
           for (const env of ["sandbox", "production"] as Env[]) {
             const state = profile.envs[env];
             if (!state) continue;
-            jobs.push(tryRevoke(store, name, env, state));
+            jobs.push(tryRevoke(name, env, state));
           }
         }
         const results = await Promise.allSettled(jobs);
         revokedCount = results.filter((r) => r.status === "fulfilled" && r.value).length;
       }
 
-      // Clear keychain slots for every profile we know about
-      for (const name of profileNames) {
-        await store.deleteProfile(name);
-      }
-
-      // Wipe the on-disk files
+      // Wipe the on-disk files. The store is file-only, so deleting session.json
+      // wholesale clears every profile's tokens — no need for per-profile,
+      // lock-acquiring deleteProfile calls (which would themselves hang on an
+      // orphaned lock, the very state reset exists to recover from).
       await wipeFiles();
 
       process.stdout.write(
@@ -122,14 +120,16 @@ export default defineCommand({
 });
 
 async function wipeFiles(): Promise<void> {
-  for (const fp of [configFilePath(), secretsFilePath()]) {
+  // Include the lockfile: a stale one left by a killed process is exactly what
+  // reset must be able to clear, so it's deleted directly here rather than acquired.
+  for (const fp of [configFilePath(), sessionFilePath(), lockFilePath(), sdkKeyFilePath()]) {
     await unlink(fp).catch((err: NodeJS.ErrnoException) => {
       if (err.code !== "ENOENT") throw err;
     });
   }
 }
 
-async function tryRevoke(store: SecretsStore, profileName: string, env: Env, state: EnvState): Promise<boolean> {
+async function tryRevoke(profileName: string, env: Env, state: EnvState): Promise<boolean> {
   const endpoint = revokeEndpointFor(state);
   if (!endpoint) {
     process.stderr.write(
@@ -138,8 +138,14 @@ async function tryRevoke(store: SecretsStore, profileName: string, env: Env, sta
     return false;
   }
 
-  const token = await store.get(profileName, env);
-  if (!token) return false;
+  const stored = state.sdkAccessId ? await findSdkKey(state.sdkAccessId) : undefined;
+  const token = stored?.apiSecret;
+  if (!token) {
+    process.stderr.write(
+      `  skipping server revoke for ${profileName}/${env}: no stored secret for ${endpoint.label}. Revoke it from the dashboard.\n`
+    );
+    return false;
+  }
 
   try {
     assertTlsHardenedEnv();

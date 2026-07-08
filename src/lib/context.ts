@@ -1,7 +1,14 @@
 import {parseEnvFlag, resolveBaseUrl, type Env} from "./env";
 import {buildAuthHeader, fingerprintToken} from "./auth";
+import {latestSdkSecret} from "./sdk-key-file";
 import {createSecretsStore} from "./secrets-store";
-import {isProfileIncomplete, reconcileConfig, resolveActiveProfile, type ProfileConfig} from "./config-store";
+import {
+  getActiveBusinessId,
+  isProfileIncomplete,
+  reconcileConfig,
+  resolveActiveProfile,
+  type ProfileConfig
+} from "./config-store";
 import {buildHttpClient, assertTlsHardenedEnv, type HttpClient} from "./http";
 import {resolveFormat, print, type OutputFormat} from "./output";
 import {AtoaError} from "./errors";
@@ -21,6 +28,8 @@ export interface CommandContext {
   env: Env;
   http: HttpClient;
   format: OutputFormat;
+  /** True when the user passed --output explicitly (so list views stay JSON instead of going interactive). */
+  formatExplicit: boolean;
   verbose: boolean;
   dryRun: boolean;
   yes: boolean;
@@ -30,7 +39,10 @@ export interface CommandContext {
   profile: ProfileConfig;
 }
 
-export async function buildContext(opts: CommonOptions): Promise<CommandContext> {
+export async function buildContext(
+  opts: CommonOptions,
+  flags: {allowIncomplete?: boolean} = {}
+): Promise<CommandContext> {
   assertTlsHardenedEnv();
 
   // Self-heal a dangling activeProfile pointer (e.g. user manually deleted a
@@ -52,7 +64,7 @@ export async function buildContext(opts: CommonOptions): Promise<CommandContext>
   // Refuse to run commands against a profile that's missing required local
   // fields (today: businessId). A corrupted / hand-edited entry should fail
   // loudly with an actionable message, not crash deep in code.
-  if (isProfileIncomplete(resolved.profile)) {
+  if (!flags.allowIncomplete && isProfileIncomplete(resolved.profile)) {
     throw new AtoaError(
       `profile "${resolved.name}" is incomplete (missing businessId). ` +
         `Re-pair via \`atoa login --profile ${resolved.name}\` or remove it with \`atoa logout --profile ${resolved.name}\`.`,
@@ -62,33 +74,108 @@ export async function buildContext(opts: CommonOptions): Promise<CommandContext>
 
   const env = parseEnvFlag(opts.env ?? resolved.profile.defaultEnv);
   const format = resolveFormat(opts.output);
+  const formatExplicit = opts.output !== undefined;
   const verbose = opts.verbose ?? false;
   const dryRun = opts.dryRun ?? false;
   const yes = opts.yes ?? false;
 
   const store = await createSecretsStore();
-  const token = await store.get(resolved.name, env);
-  if (!token) {
-    throw new AtoaError(
-      `No credentials for ${resolved.name}/${env}. Run: atoa login --profile ${resolved.name}`,
-      "auth"
-    );
-  }
 
-  const authHeader = buildAuthHeader(token);
-  const authFingerprint = fingerprintToken(token);
-  const http = buildHttpClient({baseUrl: resolveBaseUrl(), authHeader, verbose});
+  // The CLI is JWT-only: every authenticated command uses the browser-login session
+  // (access/refresh pair), supplied per-request by the http jwt seam below. SDK keys are
+  // never stored by the CLI — they live in ~/atoa/auth/secret_key.json for the user/agent.
+  const jwt = await store.getJwtTokens(resolved.name);
+  if (!jwt) {
+    throw new AtoaError(`No credentials for ${resolved.name}. Run: atoa login --profile ${resolved.name}`, "auth");
+  }
+  const authHeader = "unused";
+  const authFingerprint = "";
+
+  // JWT session seam for `auth: "jwt"` requests. Bound to the
+  // resolved profile + env so the HTTP layer stays store-agnostic.
+  const profileName = resolved.name;
+  const http = buildHttpClient({
+    baseUrl: resolveBaseUrl(),
+    authHeader,
+    verbose,
+    jwt: {
+      getTokens: () => store.getJwtTokens(profileName),
+      setTokens: (tokens) => store.setJwtTokens(profileName, tokens),
+      clearTokens: () => store.clearJwtTokens(profileName),
+      // Re-read per request (not a snapshot) so an `atoa business use` that
+      // lands mid-process is picked up on the next request.
+      getActiveBusinessId: () => getActiveBusinessId(profileName)
+    }
+  });
 
   return {
     env,
     http,
     format,
+    formatExplicit,
     verbose,
     dryRun,
     yes,
     authFingerprint,
     profileName: resolved.name,
     profile: resolved.profile,
+    print: (data) => print(data, format)
+  };
+}
+
+/**
+ * Guard for the SDK-key commands: returns the stored SDK bearer for `env`. SDK keys must be
+ * minted explicitly (`atoa keys create`) so they always carry a
+ * revocable sdkAccessId. There is deliberately NO paste-and-store fallback — pasting a raw secret
+ * would persist an un-revocable plaintext key (no sdkAccessId for `atoa keys revoke` to target).
+ * The key is kept ONLY in ~/.atoa/auth/secret_key.json (never the OS keychain).
+ */
+export async function ensureSdkKey(env: Env): Promise<string> {
+  const existing = await latestSdkSecret(env);
+  if (existing) return existing;
+
+  throw new AtoaError(
+    `No Atoa API key stored for ${env}. Mint a revocable one with \`atoa keys create --env ${env}\`, then retry.`,
+    "auth"
+  );
+}
+
+/**
+ * Context for the SDK-key commands (customers, payments, refunds, …). Unlike buildContext it does
+ * NOT require a JWT login — it authenticates with the stored SDK key (file-based, no keychain).
+ * Errors via ensureSdkKey when no key is stored. dry-run skips the key entirely (no request sent).
+ */
+export async function buildSdkContext(opts: CommonOptions): Promise<CommandContext> {
+  assertTlsHardenedEnv();
+
+  const env = parseEnvFlag(opts.env ?? "sandbox");
+  const format = resolveFormat(opts.output);
+  const formatExplicit = opts.output !== undefined;
+  const verbose = opts.verbose ?? false;
+  const dryRun = opts.dryRun ?? false;
+  const yes = opts.yes ?? false;
+
+  let authHeader = "unused";
+  let authFingerprint = "";
+  if (!dryRun) {
+    const key = await ensureSdkKey(env);
+    authHeader = buildAuthHeader(key);
+    authFingerprint = fingerprintToken(key);
+  }
+
+  const http = buildHttpClient({baseUrl: resolveBaseUrl(), authHeader, verbose});
+
+  return {
+    env,
+    http,
+    format,
+    formatExplicit,
+    verbose,
+    dryRun,
+    yes,
+    authFingerprint,
+    profileName: "sdk",
+    profile: {businessId: "", displayName: "SDK", defaultEnv: env, envs: {}},
     print: (data) => print(data, format)
   };
 }

@@ -1,6 +1,6 @@
 import {defineCommand} from "citty";
 import {promises as fs} from "fs";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {readStdin} from "../../lib/request-utils";
 import {AtoaError} from "../../lib/errors";
 
@@ -28,7 +28,7 @@ export default defineCommand({
         'Basic: \'{"username":"...","password":"..."}\''
     }
   }),
-  run: runWithContext<CreateArgs>(async (ctx, args) => {
+  run: runWithSdkKey<CreateArgs>(async (ctx, args) => {
     let authentication: Record<string, unknown> | undefined;
     if (args.authentication) {
       const raw = await resolveAuthSource(args.authentication);
@@ -61,7 +61,8 @@ export default defineCommand({
     const {data} = await ctx.http.request({
       method: "POST",
       path: "/api/webhook/merchant",
-      body
+      body,
+      auth: "sdk"
     });
     ctx.print(data);
   })

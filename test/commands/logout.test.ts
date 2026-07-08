@@ -3,19 +3,26 @@ import {promises as fs} from "fs";
 import {tmpdir} from "os";
 import {join} from "path";
 
-// Force file backend in tests — mocked at the secrets-store layer because
-// the source loads @napi-rs/keyring via require(), which bypasses vi.mock.
-vi.mock("../../src/lib/secrets-store", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/secrets-store")>();
-  const {buildFileSecretsStore} = await import("../helpers/file-store-mock");
+import {sessionFilePath, authDir} from "../../src/lib/secrets-store";
+import {configFilePath} from "../../src/lib/config-store";
+
+// logoutJwt does a best-effort server revoke via its OWN http client. Stub lib/http so tests never
+// touch a real network (localhost:9090) — a rejected request is exactly the "revoke failed, proceed
+// with local cleanup" path the tests assert.
+vi.mock("../../src/lib/http", async () => {
+  const actual = await vi.importActual<any>("../../src/lib/http");
   return {
     ...actual,
-    createSecretsStore: async () => buildFileSecretsStore(actual.secretsFilePath)
+    assertTlsHardenedEnv: () => {},
+    buildHttpClient: () => ({
+      baseUrl: "https://api.atoa.test",
+      request: async () => {
+        throw new Error("server revoke unavailable in test");
+      }
+    })
   };
 });
 
-import {secretsFilePath} from "../../src/lib/secrets-store";
-import {configFilePath, readConfig} from "../../src/lib/config-store";
 import logout from "../../src/commands/logout";
 
 let scratch: string;
@@ -36,9 +43,25 @@ async function writeConfig(cfg: unknown): Promise<void> {
   await fs.writeFile(configFilePath(), JSON.stringify(cfg, null, 2), {mode: 0o600});
 }
 
-async function writeSecrets(slots: Record<string, string>): Promise<void> {
-  await fs.mkdir(join(scratch, ".config", "atoa"), {recursive: true, mode: 0o700});
-  await fs.writeFile(secretsFilePath(), JSON.stringify(slots), {mode: 0o600});
+/** Write the JWT session file ({sessions: {"<profile>": {...}}}). */
+async function writeSession(sessions: Record<string, {accessToken: string; refreshToken: string}>): Promise<void> {
+  await fs.mkdir(authDir(), {recursive: true, mode: 0o700});
+  await fs.writeFile(sessionFilePath(), JSON.stringify({sessions}), {mode: 0o600});
+}
+
+async function readSessions(): Promise<Record<string, {accessToken: string; refreshToken: string}>> {
+  return JSON.parse(await fs.readFile(sessionFilePath(), "utf8")).sessions;
+}
+
+/** A JWT-mode profile config. */
+function jwtConfig(envs: Record<string, {authMode: "jwt"; tokenFingerprint: string}>, defaultEnv: string) {
+  return {
+    schemaVersion: 1,
+    activeProfile: "acme",
+    profiles: {
+      acme: {businessId: "b1", displayName: "Acme", defaultEnv, envs}
+    }
+  };
 }
 
 describe("atoa logout", () => {
@@ -50,165 +73,71 @@ describe("atoa logout", () => {
     stdout.mockRestore();
   });
 
-  it("--dryRun shows what would be cleared without touching state", async () => {
-    await writeConfig({
-      schemaVersion: 1,
-      activeProfile: "acme",
-      profiles: {
-        acme: {
-          businessId: "b1",
-          displayName: "Acme",
-          defaultEnv: "production",
-          envs: {
-            sandbox: {sdkAccessId: "sda_sb", tokenFingerprint: "x"},
-            production: {sdkAccessId: "sda_prod", tokenFingerprint: "y"}
-          }
-        }
-      }
+  it("--dryRun shows JWT intent without touching the session file", async () => {
+    await writeConfig(
+      jwtConfig(
+        {
+          sandbox: {authMode: "jwt", tokenFingerprint: "x"},
+          production: {authMode: "jwt", tokenFingerprint: "y"}
+        },
+        "production"
+      )
+    );
+    await writeSession({
+      acme: {accessToken: "at-1", refreshToken: "rt-1"}
     });
-    await writeSecrets({"acme:sandbox": "tk-sb", "acme:production": "tk-prod"});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "production", revoke: true, dryRun: true}, rawArgs: []});
+    await (logout.run as any)({args: {dryRun: true}, rawArgs: []});
 
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
     const parsed = JSON.parse(out);
     expect(parsed).toMatchObject({
       action: "logout",
       profile: "acme",
-      env: "production",
-      willClearKeychainSlot: true,
-      willClearConfigEntry: true,
-      willRevokeServerSide: true,
-      sdkAccessId: "sda_prod"
+      willRevokeRefreshToken: true,
+      willClearJwtTokens: true
     });
-    expect(parsed.remainingEnvsAfter).toEqual(["sandbox"]);
 
-    // Files untouched
-    const secrets = JSON.parse(await fs.readFile(secretsFilePath(), "utf8"));
-    expect(secrets["acme:production"]).toBe("tk-prod");
+    // Session file untouched
+    const sessions = await readSessions();
+    expect(sessions.acme.refreshToken).toBe("rt-1");
     stdout.mockRestore();
   });
 
-  it("--dryRun reports remainingEnvsAfter as empty when last env is being removed", async () => {
-    await writeConfig({
-      schemaVersion: 1,
-      activeProfile: "acme",
-      profiles: {
-        acme: {
-          businessId: "b1",
-          displayName: "Acme",
-          defaultEnv: "sandbox",
-          envs: {sandbox: {sdkAccessId: "sda_sb", tokenFingerprint: "x"}}
-        }
-      }
+  it("--yes + --env clears the profile's (env-independent) JWT session", async () => {
+    await writeConfig(
+      jwtConfig(
+        {
+          sandbox: {authMode: "jwt", tokenFingerprint: "x"},
+          production: {authMode: "jwt", tokenFingerprint: "y"}
+        },
+        "sandbox"
+      )
+    );
+    // JWT sessions are env-independent — one session per profile.
+    await writeSession({
+      acme: {accessToken: "at-1", refreshToken: "rt-1"}
     });
-    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "sandbox", dryRun: true}, rawArgs: []});
-    const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    const parsed = JSON.parse(out);
-    expect(parsed.remainingEnvsAfter).toEqual([]);
-    stdout.mockRestore();
-  });
-
-  it("--yes + --env clears the slot + config entry for that env only", async () => {
-    await writeConfig({
-      schemaVersion: 1,
-      activeProfile: "acme",
-      profiles: {
-        acme: {
-          businessId: "b1",
-          displayName: "Acme",
-          defaultEnv: "sandbox",
-          envs: {
-            sandbox: {sdkAccessId: "sda_sb", tokenFingerprint: "x"},
-            production: {sdkAccessId: "sda_prod", tokenFingerprint: "y"}
-          }
-        }
-      }
-    });
-    await writeSecrets({"acme:sandbox": "tk-sb", "acme:production": "tk-prod"});
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (logout.run as any)({args: {env: "sandbox", yes: true}, rawArgs: []});
 
-    const secrets = JSON.parse(await fs.readFile(secretsFilePath(), "utf8"));
-    expect(secrets["acme:sandbox"]).toBeUndefined();
-    expect(secrets["acme:production"]).toBe("tk-prod");
-
-    const cfg = await readConfig();
-    expect(cfg.profiles.acme.envs.sandbox).toBeUndefined();
-    expect(cfg.profiles.acme.envs.production).toBeDefined();
+    const sessions = await readSessions();
+    expect(sessions.acme).toBeUndefined();
 
     stdout.mockRestore();
+    stderr.mockRestore();
   });
 
-  it("promotes the survivor env to defaultEnv when one env remains", async () => {
-    await writeConfig({
-      schemaVersion: 1,
-      activeProfile: "acme",
-      profiles: {
-        acme: {
-          businessId: "b1",
-          displayName: "Acme",
-          defaultEnv: "production",
-          envs: {
-            sandbox: {sdkAccessId: "sda_sb", tokenFingerprint: "x"},
-            production: {sdkAccessId: "sda_prod", tokenFingerprint: "y"}
-          }
-        }
-      }
-    });
-    await writeSecrets({"acme:sandbox": "tk-sb", "acme:production": "tk-prod"});
-
+  it("is a no-op when the profile has no JWT session (nothing to clear)", async () => {
+    await writeConfig(jwtConfig({sandbox: {authMode: "jwt", tokenFingerprint: "x"}}, "sandbox"));
+    // No session written → nothing to clear.
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "production", yes: true}, rawArgs: []});
-
-    const cfg = await readConfig();
-    expect(cfg.profiles.acme.defaultEnv).toBe("sandbox"); // promoted
-    stdout.mockRestore();
-  });
-
-  it("removes the profile entry entirely when the last env is logged out", async () => {
-    await writeConfig({
-      schemaVersion: 1,
-      activeProfile: "acme",
-      profiles: {
-        acme: {
-          businessId: "b1",
-          displayName: "Acme",
-          defaultEnv: "sandbox",
-          envs: {sandbox: {sdkAccessId: "sda_sb", tokenFingerprint: "x"}}
-        }
-      }
-    });
-    await writeSecrets({"acme:sandbox": "tk-sb"});
-
-    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "sandbox", yes: true}, rawArgs: []});
-
-    const cfg = await readConfig();
-    expect(cfg.profiles).not.toHaveProperty("acme");
-    stdout.mockRestore();
-  });
-
-  it("already-cleared env is a no-op", async () => {
-    await writeConfig({
-      schemaVersion: 1,
-      activeProfile: "acme",
-      profiles: {
-        acme: {
-          businessId: "b1",
-          displayName: "Acme",
-          defaultEnv: "sandbox",
-          envs: {sandbox: {sdkAccessId: "sda_sb", tokenFingerprint: "x"}}
-        }
-      }
-    });
-    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await (logout.run as any)({args: {env: "production", yes: true}, rawArgs: []});
+    await (logout.run as any)({args: {yes: true}, rawArgs: []});
     const out = stdout.mock.calls.map((c) => String(c[0])).join("");
-    expect(out).toMatch(/already cleared/);
+    expect(out).toMatch(/already logged out|nothing to clear/);
     stdout.mockRestore();
   });
 });

@@ -1,57 +1,35 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
-import {walkAllPages} from "../../lib/pagination";
+import {withCommonArgs, runProdSdkKey, type CommonOptions} from "../_common";
+import {fetchAllPages, presentList} from "../../lib/list-view";
 
-type ListArgs = CommonOptions & {
-  page?: string;
-  size?: string;
-  search?: string;
-  pageAll?: boolean;
-};
+type ListArgs = CommonOptions & {search?: string};
+
+const CUSTOMERS_ROUTE = {method: "GET", path: "/api/customers", auth: "sdk"} as const;
 
 export default defineCommand({
   meta: {name: "list", description: "List customers"},
   args: withCommonArgs({
-    page: {type: "string", default: "0", description: "page number (0-indexed)"},
-    size: {type: "string", default: "20", description: "page size"},
-    search: {type: "string", description: "name/email search filter"},
-    pageAll: {type: "boolean", description: "auto-walk all pages"}
+    search: {type: "string", description: "name/email search filter"}
   }),
-  run: runWithContext<ListArgs>(async (ctx, args) => {
-    const baseQuery: Record<string, string> = {
-      ...(args.search && {search: args.search})
-    };
+  run: runProdSdkKey<ListArgs>(async (ctx, args) => {
+    const baseQuery: Record<string, string> = {...(args.search && {search: args.search})};
 
     if (ctx.dryRun) {
-      ctx.print({
-        method: "GET",
-        path: "/api/customers",
-        query: {page: args.page, size: args.size, ...baseQuery}
-      });
+      ctx.print({...CUSTOMERS_ROUTE, query: baseQuery});
       return;
     }
 
-    if (args.pageAll) {
-      const size = Number(args.size);
-      const all = await walkAllPages({
-        pageSize: size,
-        fetchPage: async (page) => {
-          const {data} = await ctx.http.request({
-            method: "GET",
-            path: "/api/customers",
-            query: {page, size, ...baseQuery}
-          });
-          return data;
-        }
-      });
-      ctx.print(all);
-    } else {
-      const {data} = await ctx.http.request({
-        method: "GET",
-        path: "/api/customers",
-        query: {page: args.page, size: args.size, ...baseQuery}
-      });
-      ctx.print(data);
-    }
+    // Paginated endpoint — fetchAllPages walks every page, presentList shows a scrollable picker
+    // (Enter for full detail) on an interactive TTY, or the raw rows when piped / --output.
+    const rows = await fetchAllPages(ctx, CUSTOMERS_ROUTE, baseQuery);
+    await presentList(ctx, rows, {
+      title: "Customers",
+      line: (c) => {
+        const phone = c["phoneNumber"]
+          ? [c["phoneCountryCode"] && `+${c["phoneCountryCode"]}`, c["phoneNumber"]].filter(Boolean).join(" ")
+          : undefined;
+        return [c["fullName"], c["email"], phone, c["type"]].filter(Boolean).join("  ·  ");
+      }
+    });
   })
 });

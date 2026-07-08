@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 
 type CreateArgs = CommonOptions & {
@@ -68,7 +68,7 @@ export default defineCommand({
       description: "override the auto-generated Idempotency-Key (e.g. CI dedup keyed off $RUN_ID)"
     }
   }),
-  run: runWithContext<CreateArgs>(async (ctx, args) => {
+  run: runWithSdkKey<CreateArgs>(async (ctx, args) => {
     const amount = Number(args.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new AtoaError("--amount must be a positive finite number", "validation");

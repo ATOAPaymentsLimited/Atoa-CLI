@@ -1,6 +1,6 @@
 import {defineCommand} from "citty";
 import {confirm} from "@inquirer/prompts";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type DeleteArgs = CommonOptions & {id?: string; customer?: string};
 
@@ -10,7 +10,7 @@ export default defineCommand({
     id: {type: "positional", required: true, description: "card ID"},
     customer: {type: "string", required: true, description: "customer ID"}
   }),
-  run: runWithContext<DeleteArgs>(async (ctx, args) => {
+  run: runWithSdkKey<DeleteArgs>(async (ctx, args) => {
     const id = args.id as string;
     const customer = args.customer as string;
     const path = `/api/customers/${encodeURIComponent(customer)}/cards/${encodeURIComponent(id)}`;

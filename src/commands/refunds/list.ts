@@ -1,5 +1,5 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "../_common";
 
 type ListArgs = CommonOptions & {paymentRequestId?: string};
 
@@ -8,7 +8,7 @@ export default defineCommand({
   args: withCommonArgs({
     paymentRequestId: {type: "string", required: true, description: "paymentRequestId"}
   }),
-  run: runWithContext<ListArgs>(async (ctx, args) => {
+  run: runWithSdkKey<ListArgs>(async (ctx, args) => {
     const path = `/api/refund/${encodeURIComponent(args.paymentRequestId as string)}`;
 
     if (ctx.dryRun) {
