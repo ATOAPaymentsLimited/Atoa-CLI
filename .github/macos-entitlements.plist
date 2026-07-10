@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the pkg-bundled `atoa` binary.
+
+  The binary embeds Node.js, whose V8 engine uses a JIT and must allocate
+  writable+executable memory (its "CodeRange"). The hardened runtime (required
+  for notarization) blocks that by default, so the binary crashes at startup:
+      Fatal process OOM in Failed to reserve virtual memory for CodeRange
+  These entitlements re-permit it, and Apple's notary service accepts them.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-executable-page-protection</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

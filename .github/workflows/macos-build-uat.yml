@@ -73,7 +73,10 @@ jobs:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: |
           for f in dist/atoa-darwin-arm64 dist/atoa-darwin-x64; do
+            # --entitlements is REQUIRED: the bundled Node/V8 JIT needs executable
+            # memory, which the hardened runtime blocks without these grants.
             codesign --force --timestamp --options runtime \
+              --entitlements .github/macos-entitlements.plist \
               --sign "$APPLE_SIGN_IDENTITY" "$f"
             codesign --verify --strict --verbose=2 "$f"
           done
