@@ -39,6 +39,12 @@ const main = defineCommand({
     "payment-links": () => import("./commands/payment-links").then((m) => m.default),
     signup: () => import("./commands/signup").then((m) => m.default),
     webhooks: () => import("./commands/webhooks").then((m) => m.default),
+    addons: () => import("./commands/addons").then((m) => m.default),
+    "google-review": () => import("./commands/google-review").then((m) => m.default),
+    branding: () => import("./commands/branding").then((m) => m.default),
+    "sms-name": () => import("./commands/sms-name").then((m) => m.default),
+    "direct-debit": () => import("./commands/direct-debit").then((m) => m.default),
+    comms: () => import("./commands/comms").then((m) => m.default),
 
     // SDK-key commands (auth via ~/atoa/auth/secret_key.json; the guard prompts for a key if missing)
     payments: () => import("./commands/payments").then((m) => m.default),

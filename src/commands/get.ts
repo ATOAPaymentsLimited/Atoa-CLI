@@ -30,14 +30,15 @@ export default defineCommand({
           const {data} = await ctx.http.request({
             method: "GET",
             path: resolvedPath,
-            query: {...query, page: String(page), size: String(size)}
+            query: {...query, page: String(page), size: String(size)},
+            auth: "jwt"
           });
           return data;
         }
       });
       ctx.print(results);
     } else {
-      const {data} = await ctx.http.request({method: "GET", path: resolvedPath, query});
+      const {data} = await ctx.http.request({method: "GET", path: resolvedPath, query, auth: "jwt"});
       ctx.print(data);
     }
   })

@@ -1,7 +1,7 @@
 import {describe, it, expect, vi, beforeEach} from "vitest";
 
 const mock = vi.hoisted(() => {
-  const requests: Array<{method: string; path: string; query?: any; body?: any}> = [];
+  const requests: Array<{method: string; path: string; query?: any; body?: any; auth?: string}> = [];
   return {
     requests,
     reset() {
@@ -20,7 +20,8 @@ const mock = vi.hoisted(() => {
             method: req.method,
             path,
             query: req.query,
-            body: req.body
+            body: req.body,
+            auth: req.auth
           });
           return {status: 200, data: {ok: true}, requestId: "r"};
         }
@@ -69,6 +70,21 @@ describe("get", () => {
     });
     expect(mock.requests[0].query).toMatchObject({limit: "5", search: "jane"});
   });
+
+  // Regression: these commands run under runWithContext (a JWT context whose authHeader is
+  // literally "unused"), so omitting `auth` let http.ts fall back to its "sdk" default and
+  // every request 401'd. Assert the mode explicitly — the shape assertions above passed
+  // throughout because the mock ignored auth entirely.
+  it("sends jwt auth, not the sdk default", async () => {
+    await (get.run as any)({args: {path: "/api/customers"}, rawArgs: []});
+    expect(mock.requests[0].auth).toBe("jwt");
+  });
+
+  it("sends jwt auth on the --page-all path too", async () => {
+    await (get.run as any)({args: {path: "/api/customers", pageAll: true}, rawArgs: []});
+    expect(mock.requests.length).toBeGreaterThan(0);
+    for (const req of mock.requests) expect(req.auth).toBe("jwt");
+  });
 });
 
 describe("post", () => {
@@ -83,11 +99,21 @@ describe("post", () => {
       body: {fullName: "Jane", email: "j@x.com"}
     });
   });
+
+  it("sends jwt auth, not the sdk default", async () => {
+    await (post.run as any)({args: {path: "/api/customers"}, rawArgs: []});
+    expect(mock.requests[0].auth).toBe("jwt");
+  });
 });
 
 describe("delete", () => {
   it("DELETEs the literal path when --yes is set", async () => {
     await (del.run as any)({args: {path: "/api/customers/cus_1", yes: true}, rawArgs: []});
     expect(mock.requests[0]).toMatchObject({method: "DELETE", path: "/api/customers/cus_1"});
+  });
+
+  it("sends jwt auth, not the sdk default", async () => {
+    await (del.run as any)({args: {path: "/api/customers/cus_1", yes: true}, rawArgs: []});
+    expect(mock.requests[0].auth).toBe("jwt");
   });
 });

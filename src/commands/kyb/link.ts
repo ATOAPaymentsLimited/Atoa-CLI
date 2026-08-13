@@ -27,7 +27,11 @@ function buildKybUrl(businessId: string): string {
 export default defineCommand({
   meta: {name: "link", description: "Get the KYB dashboard deep-link (optionally open in browser)"},
   args: withCommonArgs({
-    open: {type: "boolean", description: "open the URL in the default browser"}
+    open: {
+      type: "boolean",
+      default: true,
+      description: "open the URL in the default browser (--no-open to just print it)"
+    }
   }),
   run: runWithContext<LinkArgs>(async (ctx, args) => {
     const businessId = await getActiveBusinessId(ctx.profileName);
@@ -41,12 +45,15 @@ export default defineCommand({
     const url = buildKybUrl(businessId);
 
     if (ctx.dryRun) {
-      ctx.print({url, open: args.open ?? false});
+      ctx.print({url, open: args.open ?? true});
       return;
     }
 
-    if (args.open) {
-      await openBrowser(url);
+    if (args.open ?? true) {
+      const opened = await openBrowser(url);
+      if (!opened) {
+        process.stderr.write("Could not open a browser automatically — open the URL below manually.\n");
+      }
     }
 
     ctx.print({url});

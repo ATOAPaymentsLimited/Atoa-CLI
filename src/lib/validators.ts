@@ -32,11 +32,41 @@ export const validateAddress = (v: string): true | string => {
   return /^[a-zA-Z0-9,'&: -]+$/.test(s) || "Address can only contain letters, numbers, spaces and , ' & : -";
 };
 
+// Address line 2 is optional and, on the dashboard, carries no validation rules at all —
+// only the same character filter as line 1. Empty passes.
+export const validateAddressLine2 = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  if (s.length > 120) return "Address must be 120 characters or fewer";
+  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || "Address can only contain letters, numbers, spaces and , ' & : -";
+};
+
 export const validatePostcode = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (s.length <= 2) return "Please enter a valid postal code";
   if (s.length > (s.includes(" ") ? 8 : 7)) return "Please enter a valid postal code";
   return /^[a-zA-Z0-9 ]+$/.test(s) || "Please enter a valid postal code";
+};
+
+// VAT is required at signup, matching the dashboard (createVatValidationRule with
+// isOptional defaulted false). Same pattern it uses: optional GB prefix + 9 digits.
+export const VAT_RE = /^(GB)?\d{9}$/i;
+
+export const validateVatNumber = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return "VAT number is required";
+  return VAT_RE.test(s) || "VAT number must contain 9 digits (e.g. 123456789 or GB123456789)";
+};
+
+// Website is optional; when supplied it must look like a URL. Mirrors the dashboard's
+// isValidUrl — bare www.* is accepted alongside http(s)://.
+const URL_RE =
+  /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/i;
+
+export const validateWebsiteUrl = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  return URL_RE.test(s) || "Please enter a valid website URL";
 };
 
 // Phone is optional; when supplied the country code must be 1–4 digits.
