@@ -5,6 +5,8 @@ export default defineCommand({
   subCommands: {
     list: () => import("./list").then((m) => m.default),
     get: () => import("./get").then((m) => m.default),
+    add: () => import("./add").then((m) => m.default),
+    update: () => import("./update").then((m) => m.default),
     image: () => import("./image").then((m) => m.default),
     "link-bank": () => import("./link-bank").then((m) => m.default)
   }

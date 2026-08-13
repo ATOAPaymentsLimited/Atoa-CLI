@@ -16,7 +16,13 @@ const INDICES = [
   "profile",
   "refunds",
   "stores",
-  "webhooks"
+  "webhooks",
+  "addons",
+  "google-review",
+  "branding",
+  "sms-name",
+  "direct-debit",
+  "comms"
 ];
 
 describe("command index wiring", () => {

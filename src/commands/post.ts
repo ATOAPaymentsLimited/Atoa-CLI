@@ -35,7 +35,8 @@ export default defineCommand({
       path: resolvedPath,
       query,
       body,
-      idempotencyKey: args.idempotencyKey
+      idempotencyKey: args.idempotencyKey,
+      auth: "jwt"
     });
     ctx.print(data);
   })

@@ -205,12 +205,20 @@ vi.mock("../../src/lib/config-store", async () => {
     setActiveBusinessId: mock.setActiveBusinessId_fn,
     // Profile rename touches the real ~/.atoa store; no-op it so the wizard reaches the summary.
     renameProfile: async () => {},
-    // ensureSignedUp() resolves an existing session → these short-circuit step-0.
-    resolveActiveProfile: async () => ({
-      kind: "ok",
-      name: "acme",
-      profile: {businessId: "biz_1", displayName: "Acme", envs: {production: {tokenFingerprint: "x"}}}
-    })
+    readProfile: async (name: string) =>
+      name === "acme" ? {businessId: "biz_1", displayName: "Acme", envs: {}} : undefined,
+    // Mirrors the real resolver: an explicit --profile naming something unknown THROWS.
+    // That is what made `signup --profile <new>` impossible before the fix.
+    resolveActiveProfile: async (flagProfile?: string) => {
+      if (flagProfile && flagProfile !== "acme") {
+        throw new Error(`No profile named "${flagProfile}". Run \`atoa profile list\` to see available profiles.`);
+      }
+      return {
+        kind: "ok",
+        name: "acme",
+        profile: {businessId: "biz_1", displayName: "Acme", envs: {production: {tokenFingerprint: "x"}}}
+      };
+    }
   };
 });
 
@@ -238,38 +246,49 @@ vi.mock("../../src/lib/http", async () => {
 const promptMocks = vi.hoisted(() => ({
   input: vi.fn(),
   confirm: vi.fn(),
-  select: vi.fn()
+  select: vi.fn(),
+  search: vi.fn()
 }));
 vi.mock("@inquirer/prompts", () => ({
   input: promptMocks.input,
   confirm: promptMocks.confirm,
-  select: promptMocks.select
+  select: promptMocks.select,
+  search: promptMocks.search
 }));
 
 import signup from "../../src/commands/signup";
+import {validateVatNumber} from "../../src/lib/validators";
 
 const paths = () => mock.requests.map((r) => r.path);
 const byPath = (p: string) => mock.requests.filter((r) => r.path === p);
 
-/** Full-run prompt answers (from step 1, with phone → OTP). */
+/**
+ * Full-run prompt answers (from step 1, with phone → OTP). Order mirrors the 3-step
+ * wizard aligned to the dashboard: step 1 collects turnover/VAT/website, and the old
+ * step 4 (turnover + "how did you hear about us") is gone.
+ */
 function fullRunPrompts() {
   promptMocks.input.mockReset();
   promptMocks.input
     .mockResolvedValueOnce("Acme Ltd") // step1 business name
+    .mockResolvedValueOnce("GB123456789") // step1 VAT number
+    .mockResolvedValueOnce("https://acme.example") // step1 website URL
     .mockResolvedValueOnce("John") // step3 firstName
     .mockResolvedValueOnce("Doe") // step3 lastName
     .mockResolvedValueOnce("44") // step3 phoneCountryCode
     .mockResolvedValueOnce("7700900001") // step3 phoneNumber
     .mockResolvedValueOnce("123456") // step3 OTP (withOtp)
-    .mockResolvedValueOnce("1 High St") // step3 business address
-    .mockResolvedValue("EC1A 1BB"); // step3 postcode (+ any extra)
+    .mockResolvedValueOnce("EC1A 1BB") // step3 postcode
+    .mockResolvedValueOnce("1 High St") // step3 address line 1
+    .mockResolvedValue(""); // step3 address line 2 (optional, skipped)
+
+  promptMocks.search.mockReset();
+  promptMocks.search.mockResolvedValue("bt_1"); // step1 industry (type-to-filter)
 
   promptMocks.select.mockReset();
   promptMocks.select
-    .mockResolvedValueOnce("bt_1") // step1 industry
-    .mockResolvedValueOnce("COMPANY_LTD") // step2 structure
-    .mockResolvedValueOnce("0-1000") // step4 turnover
-    .mockResolvedValue("Twitter"); // step4 source
+    .mockResolvedValueOnce("0-1000") // step1 monthly turnover
+    .mockResolvedValue("COMPANY_LTD"); // step2 structure
 
   promptMocks.confirm.mockReset();
   promptMocks.confirm.mockResolvedValue(true); // privacy, terms, marketing
@@ -291,6 +310,7 @@ describe("signup — happy path (full wizard)", () => {
       "/api/business/", // auto-resume: look for an in-progress business (list is empty → fresh signup)
       "/api/user/profile/", // prefill
       "/api/merchant/business-types/all", // step1 industry
+      "/api/merchant/average-transaction/ranges", // step1 turnover (moved up from old step 4)
       "/api/business/", // step1 createBusiness
       "/api/business/:businessId/accept-terms", // step1 consent
       "/api/user/profile/notification-options", // step1 marketing (user)
@@ -299,21 +319,49 @@ describe("signup — happy path (full wizard)", () => {
       "/api/user/profile", // step3 name
       "/api/user/profile/contact", // step3 phone (OTP send)
       "/api/user/profile/contact", // step3 phone (OTP verify)
-      "/api/business/:businessId", // step3 address
-      "/api/merchant/average-transaction/ranges", // step4 lookup
-      "/api/signup-source/all", // step4 lookup
-      "/api/business/:businessId" // step4 extras
+      "/api/business/:businessId" // step3 address
     ]);
   });
 
-  it("creates the business with the chosen name + industry (flat body)", async () => {
+  it("creates the business with name, industry, turnover, VAT and website (flat body)", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
     const create = byPath("/api/business/").find((r) => r.method === "POST");
     expect(create?.body).toMatchObject({
       legalBusinessName: "Acme Ltd",
       tradingName: "Acme Ltd",
-      businessType: {id: "bt_1", name: "Retail"}
+      businessType: {id: "bt_1", name: "Retail"},
+      averageMonthlyTransaction: "0-1000",
+      vatNumber: "GB123456789",
+      webSiteUrl: "https://acme.example"
     });
+  });
+
+  // Website is the one optional field in step 1 — blank must be omitted entirely rather
+  // than sent as "", matching how the dashboard skips it.
+  it("omits webSiteUrl when the website prompt is left blank", async () => {
+    promptMocks.input.mockReset();
+    promptMocks.input
+      .mockResolvedValueOnce("Acme Ltd")
+      .mockResolvedValueOnce("GB123456789")
+      .mockResolvedValueOnce("") // website skipped
+      .mockResolvedValueOnce("John")
+      .mockResolvedValueOnce("Doe")
+      .mockResolvedValueOnce("44")
+      .mockResolvedValueOnce("7700900001")
+      .mockResolvedValueOnce("123456")
+      .mockResolvedValueOnce("EC1A 1BB")
+      .mockResolvedValueOnce("1 High St")
+      .mockResolvedValue("");
+
+    await (signup.run as any)({args: {}, rawArgs: []});
+    const create = byPath("/api/business/").find((r) => r.method === "POST");
+    expect(create?.body).not.toHaveProperty("webSiteUrl");
+    expect(create?.body).toMatchObject({vatNumber: "GB123456789"});
+  });
+
+  it("no longer asks 'how did you hear about us' (step 4 removed)", async () => {
+    await (signup.run as any)({args: {}, rawArgs: []});
+    expect(paths()).not.toContain("/api/signup-source/all");
   });
 
   it("records consent: accept-terms + marketing (user + business)", async () => {
@@ -346,11 +394,18 @@ describe("signup — happy path (full wizard)", () => {
     expect(addr?.body?.businessInfo).toMatchObject({addressLine1: "1 High St", addressPostalCode: "EC1A 1BB"});
   });
 
-  it("sends turnover + sourceOfInstall in step 4 (full businessInfo resent)", async () => {
+  // Turnover moved from the deleted step 4 into step 1's createBusiness, and sourceOfInstall
+  // is gone entirely — so no request should ever carry it now.
+  it("never sends sourceOfInstall (step 4 removed)", async () => {
     await (signup.run as any)({args: {}, rawArgs: []});
-    const extras = byPath("/api/business/:businessId").find((r) => r.body?.sourceOfInstall);
-    expect(extras?.body?.sourceOfInstall).toBe("Twitter");
-    expect(extras?.body?.businessInfo).toMatchObject({
+    expect(byPath("/api/business/:businessId").some((r) => r.body?.sourceOfInstall)).toBe(false);
+  });
+
+  it("carries turnover through later full-businessInfo resends", async () => {
+    await (signup.run as any)({args: {}, rawArgs: []});
+    const updates = byPath("/api/business/:businessId").filter((r) => r.method === "PUT");
+    const last = updates[updates.length - 1];
+    expect(last?.body?.businessInfo).toMatchObject({
       averageMonthlyTransaction: "0-1000",
       companyType: "COMPANY_LTD",
       legalBusinessName: "Acme Ltd"
@@ -386,13 +441,17 @@ describe("signup — happy path (full wizard)", () => {
   });
 });
 
-describe("signup — --skip-extras", () => {
-  it("skips the step-4 lookups and the extras update", async () => {
-    await (signup.run as any)({args: {skipExtras: true}, rawArgs: []});
-    expect(paths()).not.toContain("/api/merchant/average-transaction/ranges");
-    expect(paths()).not.toContain("/api/signup-source/all");
-    // step-4 extras PUT (the one carrying sourceOfInstall) must not happen.
-    expect(byPath("/api/business/:businessId").some((r) => r.body?.sourceOfInstall)).toBe(false);
+describe("signup — VAT is required (dashboard parity)", () => {
+  it("rejects a VAT number that isn't 9 digits", () => {
+    expect(validateVatNumber("12345")).not.toBe(true);
+    expect(validateVatNumber("")).not.toBe(true);
+    expect(validateVatNumber("GB12345678X")).not.toBe(true);
+  });
+
+  it("accepts 9 digits with or without the GB prefix", () => {
+    expect(validateVatNumber("123456789")).toBe(true);
+    expect(validateVatNumber("GB123456789")).toBe(true);
+    expect(validateVatNumber("gb123456789")).toBe(true);
   });
 });
 
@@ -536,6 +595,48 @@ describe("signup — non-TTY", () => {
     expect(mock.requests).toHaveLength(0);
     stderr.mockRestore();
     (process.stdin as any).isTTY = true;
+  });
+});
+
+describe("signup — --profile names the NEW profile", () => {
+  // Regression: ensureSignedUp resolved --profile through resolveActiveProfile, which throws
+  // on an unknown name. But otpSignup uses that same flag to NAME the profile it creates, so
+  // `signup --profile <new>` could never succeed — the only way to onboard a fresh merchant
+  // while another profile was active was to relocate ATOA_HOME.
+  beforeEach(() => {
+    mock.setSessionExists(true); // an existing, signed-in profile is present
+    // otpSignup prompts for email + OTP *before* the wizard's own fields, so the
+    // default fullRunPrompts sequence (which starts at business name) has to be re-fronted.
+    promptMocks.input.mockReset();
+    promptMocks.input
+      .mockResolvedValueOnce("brand.new@merchant.com") // email
+      .mockResolvedValueOnce("123456") // OTP
+      .mockResolvedValueOnce("Brand New Ltd") // step1 business name
+      .mockResolvedValueOnce("GB123456789") // step1 VAT
+      .mockResolvedValueOnce("") // step1 website (skipped)
+      .mockResolvedValueOnce("Ada") // step3 firstName
+      .mockResolvedValueOnce("Lovelace") // step3 lastName
+      .mockResolvedValueOnce("44") // step3 phoneCountryCode
+      .mockResolvedValueOnce("") // step3 phone (skipped)
+      .mockResolvedValueOnce("EC1A 1BB") // step3 postcode
+      .mockResolvedValueOnce("1 New Street") // step3 address line 1
+      .mockResolvedValue(""); // step3 address line 2 (skipped)
+  });
+
+  it("creates the account instead of throwing 'No profile named'", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (signup.run as any)({args: {profile: "brand-new-merchant"}, rawArgs: []});
+    stderr.mockRestore();
+
+    // Reached account creation rather than aborting on profile resolution.
+    expect(emailHttp.requests.some((r) => r.path === "/api/otp/send-otp")).toBe(true);
+    expect(emailHttp.requests.some((r) => r.path === "/api/user/auth/sign-up")).toBe(true);
+  });
+
+  it("still short-circuits when the named profile exists and is signed in", async () => {
+    await (signup.run as any)({args: {profile: "acme"}, rawArgs: []});
+    // Known profile + live session → no account creation, straight to onboarding.
+    expect(emailHttp.requests.some((r) => r.path === "/api/user/auth/sign-up")).toBe(false);
   });
 });
 

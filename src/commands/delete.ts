@@ -25,7 +25,7 @@ export default defineCommand({
       }
     }
 
-    const {data} = await ctx.http.request({method: "DELETE", path});
+    const {data} = await ctx.http.request({method: "DELETE", path, auth: "jwt"});
     ctx.print(data);
   })
 });

@@ -40,7 +40,10 @@ export const V1_ROUTES = {
   stores: {
     list: jwt("GET", "/api/business/:businessId/stores/"),
     get: jwt("GET", "/api/business/:businessId/stores/:storeId"),
-    linkBank: jwt("PUT", "/api/business/:businessId/stores/:storeId/bank")
+    linkBank: jwt("PUT", "/api/business/:businessId/stores/:storeId/bank"),
+    // Store metadata upsert (id present in body = update, absent = create). Different
+    // controller/prefix than the read routes above — merchant-prefixed, like logo.upload.
+    upsert: jwt("POST", "/api/merchant/:businessId/store")
   },
   bank: {
     list: jwt("GET", "/api/merchant/:businessId/bank-account"),
@@ -59,10 +62,72 @@ export const V1_ROUTES = {
   },
   staff: {
     list: jwt("GET", "/api/business/:businessId/users/"),
-    create: jwt("POST", "/api/business/:businessId/users/")
+    create: jwt("POST", "/api/business/:businessId/users/"),
+    remove: jwt("DELETE", "/api/business/:businessId/users/:userId")
   },
   roles: {
-    list: jwt("GET", "/api/business/:businessId/users/role/")
+    list: jwt("GET", "/api/business/:businessId/users/role/"),
+    create: jwt("POST", "/api/business/:businessId/users/role/"),
+    update: jwt("PUT", "/api/business/:businessId/users/role/:roleId"),
+    delete: jwt("DELETE", "/api/business/:businessId/users/role/:roleId")
+  },
+  permissions: {
+    list: jwt("GET", "/api/permissions/:businessId/list")
+  },
+  options: {
+    get: jwt("GET", "/api/business/:businessId/options"),
+    update: jwt("PUT", "/api/business/:businessId/options")
+  },
+  communicationPreferences: {
+    list: jwt("GET", "/api/business/:businessId/communication-preferences"),
+    update: jwt("PUT", "/api/business/:businessId/communication-preferences")
+  },
+  customSenderName: {
+    get: jwt("GET", "/api/merchant/custom-sender-name/:businessId"),
+    create: jwt("POST", "/api/merchant/custom-sender-name/:businessId"),
+    update: jwt("PUT", "/api/merchant/custom-sender-name/:businessId/updateDetails/:customOptionId"),
+    remove: jwt("DELETE", "/api/merchant/custom-sender-name/:businessId/delete-custom-options/:customOptionId")
+  },
+  addons: {
+    // Feature usage and plan management are served by two different upstreams behind the
+    // gateway, hence the two path shapes. Plan management accepts the merchant JWT as-is.
+    featureUsage: jwt("GET", "/api/merchant/addonPlan/:businessId/featureUsage"),
+    current: jwt("GET", "/api/addonPlan/merchant/:businessId/current"),
+    available: jwt("GET", "/api/addonPlan/merchant/:businessId/available"),
+    estimatedCharges: jwt("GET", "/api/addonPlan/merchant/:businessId/estimatedMonthlyCharges"),
+    upgrade: jwt("POST", "/api/addonPlan/merchant/:businessId/upgrade/:addonPlanId"),
+    downgrade: jwt("POST", "/api/addonPlan/merchant/:businessId/downgrade/:addonPlanId"),
+    cancelDowngrade: jwt("DELETE", "/api/addonPlan/merchant/:businessId/cancelDowngrade")
+  },
+  googleReview: {
+    // Review endpoints sit under /api/review-system. Not yet exercised against a live
+    // deployment. "Google" is hardcoded rather than a :platform token since this CLI
+    // group is Google-only, matching its own command-group scope.
+    config: jwt("GET", "/api/review-system/merchant-business-config/v1/:businessId/Google"),
+    linkAccount: jwt("PUT", "/api/review-system/merchant-business-config/merchant/:businessId/link-business-account"),
+    unlinkConfig: jwt("DELETE", "/api/review-system/merchant-business-config/merchant/:businessId/Google"),
+    accounts: jwt("GET", "/api/review-system/review-platform/:businessId/Google/accounts"),
+    accountLocations: jwt("GET", "/api/review-system/review-platform/:businessId/Google/:businessAccountId/locations"),
+    storeLocations: jwt("GET", "/api/review-system/merchant-stores/:businessId/Google"),
+    linkLocation: jwt("POST", "/api/review-system/merchant-stores/:businessId/Google/link-location"),
+    unlinkLocation: jwt(
+      "DELETE",
+      "/api/review-system/merchant-stores/:businessId/Google/unlink-location/:merchantStoreId"
+    ),
+    searchLocations: jwt("GET", "/api/review-system/merchant-stores/search-google-locations")
+  },
+  cardActivation: {
+    // Statement upload (PUT .../card-activation/statement/upload) is deliberately not
+    // added here — the CLI hands compliance-document uploads to the dashboard (see
+    // `kyb card link`), same as KYB documents; no CLI-side file-upload route needed.
+    status: jwt("GET", "/api/business/:businessId/card-activation"),
+    submit: jwt("POST", "/api/business/:businessId/card-activation")
+  },
+  directDebit: {
+    // These sit under /api like every other route here; the un-prefixed variants 404 at
+    // the gateway. Verified live — assignedPlan returns the merchant's plan.
+    assignedPlan: jwt("GET", "/api/plan/:businessId/assignedPlan"),
+    confirmSetup: jwt("POST", "/api/stripe/:businessId/confirm-setup-intent")
   },
   onboarding: {
     createBusiness: jwt("POST", "/api/business/"),
