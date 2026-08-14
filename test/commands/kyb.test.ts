@@ -16,6 +16,7 @@ const mock = vi.hoisted(() => {
       printed = undefined;
     },
     cardActivationNotFound: false,
+    notFoundMessage: "No card application found for this business",
     cardActivationStatusResponse: {status: "IN_REVIEW", paymentType: "ONLINE"} as Record<string, unknown>,
     formatExplicit: true,
     submitRejectMessage: "" as string,
@@ -31,7 +32,8 @@ const mock = vi.hoisted(() => {
           if (req.path === "/api/business/:businessId/card-activation" && req.method === "GET") {
             if (mock.cardActivationNotFound) {
               const {AtoaError} = await import("../../src/lib/errors");
-              throw new AtoaError("No application", "not_found", {status: 404});
+              // Verbatim from the backend, so the discriminator is tested against reality.
+              throw new AtoaError(mock.notFoundMessage, "not_found", {status: 404});
             }
             return {status: 200, data: mock.cardActivationStatusResponse, requestId: "r"};
           }
@@ -99,6 +101,7 @@ const DASHBOARD = "https://dashboard.atoa.me";
 beforeEach(() => {
   mock.reset();
   mock.cardActivationNotFound = false;
+  mock.notFoundMessage = "No card application found for this business";
   mock.cardActivationStatusResponse = {status: "IN_REVIEW", paymentType: "ONLINE"};
   mock.formatExplicit = true;
   mock.submitRejectMessage = "";
@@ -243,6 +246,20 @@ describe("kyb card status", () => {
     expect(data.status).toBe("NOT_INITIATED");
   });
 
+  // Regression: this used to match ANY 404, so a stale businessId, a routing mistake or a
+  // gateway 404 all reported "you haven't applied yet" — which would tell a merchant with a
+  // pending or rejected application to re-apply.
+  it("does NOT mask an unrelated 404 as NOT_INITIATED", async () => {
+    mock.cardActivationNotFound = true;
+    mock.notFoundMessage = "Cannot GET /api/business/xyz/card-activation";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (kybCardStatus.run as any)({args: {}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(4); // not_found, surfaced rather than swallowed
+    expect(mock.getPrinted()).toBeUndefined();
+  });
+
   it("--dryRun does not send a request", async () => {
     await (kybCardStatus.run as any)({args: {dryRun: true}, rawArgs: []});
     expect(mock.requests).toHaveLength(0);
@@ -271,6 +288,41 @@ describe("kyb card submit", () => {
   it("omits unset optional fields entirely rather than sending empty values", async () => {
     await (kybCardSubmit.run as any)({args: {paymentType: "IN_STORE"}, rawArgs: []});
     expect(mock.requests[0].body).toEqual({paymentType: "IN_STORE"});
+  });
+
+  // Regression: these only had a `validate:` on the interactive prompt. Passed as flags they
+  // went straight to Number(), became NaN, and serialised to null — the field was silently
+  // dropped with no warning that the input was rejected.
+  it.each([
+    ["--avg-fulfilment-days", {avgFulfilmentDays: "abc"}],
+    ["--max-transaction-amount", {maxTransactionAmount: "xyz"}]
+  ])("rejects a non-numeric %s instead of sending null", async (_flag, extra) => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (kybCardSubmit.run as any)({args: {paymentType: "ONLINE", ...extra}, rawArgs: []});
+    stderr.mockRestore();
+    expect(process.exitCode).toBe(3);
+    expect(mock.requests.some((r) => r.method === "POST")).toBe(false);
+  });
+
+  // Regression: the URL pattern was unanchored, so it matched a URL anywhere in the string —
+  // "javascript:alert(1)//www.evil.com" passed because it contains "www.evil.com".
+  it("rejects a javascript: URL that embeds a valid-looking host", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (kybCardSubmit.run as any)({
+      args: {paymentType: "ONLINE", website: "javascript:alert(1)//www.evil.com"},
+      rawArgs: []
+    });
+    stderr.mockRestore();
+    expect(process.exitCode).toBe(3);
+    expect(mock.requests.some((r) => r.method === "POST")).toBe(false);
+  });
+
+  it("accepts a bare domain and normalises VAT spacing/case", async () => {
+    await (kybCardSubmit.run as any)({
+      args: {paymentType: "ONLINE", website: "acme.co.uk", vat: "gb 123 456 789"},
+      rawArgs: []
+    });
+    expect(mock.requests[0].body).toMatchObject({webSiteUrl: "acme.co.uk", vatNumber: "GB123456789"});
   });
 
   it("rejects an invalid --payment-type", async () => {

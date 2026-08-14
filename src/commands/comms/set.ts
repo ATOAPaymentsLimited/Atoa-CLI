@@ -2,7 +2,8 @@ import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
-import type {TopicRow} from "./_shared";
+import {isInteractive} from "../../lib/output";
+import {formatTopic, type TopicRow} from "./_shared";
 
 type CommsSetArgs = CommonOptions & {
   topic: string;
@@ -61,7 +62,17 @@ export default defineCommand({
       return;
     }
     const {data: updated} = await ctx.http.request({...V1_ROUTES.communicationPreferences.update, body});
-    ctx.print(updated);
+
+    // The update echoes back every topic. Confirm only the one that changed — dumping all of
+    // them buries the result, and under `--output table` the nested array collapses into a
+    // single unreadable cell. Fall back to the pre-update topic if the echo omits it.
+    const result = (updated as {topics?: TopicRow[]} | null)?.topics?.find((t) => t.topicId === topic.topicId) ?? topic;
+
+    if (!isInteractive(ctx.formatExplicit)) {
+      ctx.print(result);
+      return;
+    }
+    process.stdout.write(formatTopic(result) + "\n");
   })
 });
 

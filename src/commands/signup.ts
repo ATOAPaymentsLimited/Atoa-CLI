@@ -533,9 +533,9 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     process.stderr.write("✓ Business contact details saved.\n");
   }
 
-  // Step 4 ("how did you hear about us" / sourceOfInstall) was removed to match the
-  // dashboard — PR #3804 deleted pages/registration/step-4 outright, and turnover moved
-  // up into step 1. The signupSources route record is now unused by this wizard.
+  // Step 4 ("how did you hear about us" / sourceOfInstall) was removed to match the current
+  // dashboard flow, which dropped that step; turnover moved up into step 1. The signupSources
+  // route record is now unused by this wizard.
   process.stderr.write("\n✓ Onboarding complete.\n");
 
   const bizId = await getActiveBusinessId(ctx.profileName);

@@ -33,8 +33,8 @@ export default defineCommand({
       verb: "downgrade"
     });
 
-    // The backend enforces this (checkIfCanDowngradePlan) but its 428 names no feature,
-    // so surface the specific blockers up front rather than after a failed round-trip.
+    // The backend enforces this too, but its 428 names no feature — so surface the specific
+    // blockers up front rather than after a failed round-trip.
     const blockers = downgradeBlockers(usage, target);
 
     if (ctx.dryRun) {
