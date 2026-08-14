@@ -55,18 +55,70 @@ export const VAT_RE = /^(GB)?\d{9}$/i;
 export const validateVatNumber = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return "VAT number is required";
-  return VAT_RE.test(s) || "VAT number must contain 9 digits (e.g. 123456789 or GB123456789)";
+  // Validate the normalised form so "GB 123 456 789" and "gb123456789" are accepted —
+  // the postcode prompt already normalises this way, and VAT is printed with spaces
+  // on most invoices.
+  return VAT_RE.test(normaliseVatNumber(s)) || "VAT number must contain 9 digits (e.g. 123456789 or GB123456789)";
 };
 
-// Website is optional; when supplied it must look like a URL. Mirrors the dashboard's
-// isValidUrl — bare www.* is accepted alongside http(s)://.
-const URL_RE =
-  /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/i;
+/**
+ * Website is optional; when supplied it must be an http(s) URL with a dotted host.
+ *
+ * Parsed rather than regex-matched. The pattern this replaced was unanchored, so it matched
+ * a URL *anywhere* in the string — "javascript:alert(1)//www.evil.com" passed because it
+ * contains "www.evil.com", and so did "garbage www.acme.com trailing". It also rejected
+ * legitimate bare domains like "acme.co.uk". An explicit scheme allowlist is the only
+ * reliable way to keep javascript:/data: out.
+ */
+const isValidWebsite = (raw: string): boolean => {
+  // A bare domain has no scheme; assume https so URL() can parse it.
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  // Reject whitespace anywhere, and require a dotted host with a plausible TLD.
+  if (/\s/.test(raw)) return false;
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(url.hostname);
+};
 
 export const validateWebsiteUrl = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  return URL_RE.test(s) || "Please enter a valid website URL";
+  return isValidWebsite(s) || "Please enter a valid website URL (e.g. https://acme.co.uk)";
+};
+
+/** VAT accepts an optional GB prefix and tolerates spacing/case; normalise before sending. */
+export const normaliseVatNumber = (v: string): string => (v ?? "").replace(/\s+/g, "").toUpperCase();
+
+/**
+ * Same format rule, but blank is allowed. Signup requires VAT (dashboard parity); card
+ * activation treats it as optional because the backend falls back to the stored value.
+ */
+export const validateVatOptional = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  return validateVatNumber(s);
+};
+
+/**
+ * Numeric field guards. Shared by the interactive prompts and the flag path so a value can
+ * never reach Number() unchecked — NaN serialises to null in JSON, which silently drops the
+ * field instead of reporting a bad input.
+ */
+export const validateWholeNumber = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  return /^\d+$/.test(s) || "enter a whole number of days";
+};
+
+export const validateAmount = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return true;
+  return /^\d+(\.\d{1,2})?$/.test(s) || "enter a number, e.g. 250 or 250.00";
 };
 
 // Phone is optional; when supplied the country code must be 1–4 digits.

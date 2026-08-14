@@ -12,7 +12,15 @@ export async function pickPermissionIds(ctx: CommandContext, preselected: string
   const {data} = await ctx.http.request({...V1_ROUTES.permissions.list});
   const categories = ((data as {availablePermissions?: PermissionCategoryRow[]})?.availablePermissions ??
     []) as PermissionCategoryRow[];
-  if (categories.length === 0) return [];
+  // An empty catalogue is indistinguishable from "the user deselected everything" once we
+  // return []. Callers set permissionsTouched on the result, so returning [] here would send
+  // permissionIds: [] and strip every permission from the role. Fail loudly instead.
+  if (categories.length === 0) {
+    throw new AtoaError(
+      "Could not load the permission catalogue, so permissions were left unchanged. Retry, or pass --permission explicitly.",
+      "generic"
+    );
+  }
 
   const {checkbox, Separator} = await import("@inquirer/prompts");
   const choices: Array<InstanceType<typeof Separator> | {name: string; value: string; checked?: boolean}> = [];
