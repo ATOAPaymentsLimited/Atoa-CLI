@@ -94,33 +94,6 @@ export const validateWebsiteUrl = (v: string): true | string => {
 /** VAT accepts an optional GB prefix and tolerates spacing/case; normalise before sending. */
 export const normaliseVatNumber = (v: string): string => (v ?? "").replace(/\s+/g, "").toUpperCase();
 
-/**
- * Same format rule, but blank is allowed. Signup requires VAT (dashboard parity); card
- * activation treats it as optional because the backend falls back to the stored value.
- */
-export const validateVatOptional = (v: string): true | string => {
-  const s = (v ?? "").trim();
-  if (!s) return true;
-  return validateVatNumber(s);
-};
-
-/**
- * Numeric field guards. Shared by the interactive prompts and the flag path so a value can
- * never reach Number() unchecked — NaN serialises to null in JSON, which silently drops the
- * field instead of reporting a bad input.
- */
-export const validateWholeNumber = (v: string): true | string => {
-  const s = (v ?? "").trim();
-  if (!s) return true;
-  return /^\d+$/.test(s) || "enter a whole number of days";
-};
-
-export const validateAmount = (v: string): true | string => {
-  const s = (v ?? "").trim();
-  if (!s) return true;
-  return /^\d+(\.\d{1,2})?$/.test(s) || "enter a number, e.g. 250 or 250.00";
-};
-
 // Phone is optional; when supplied the country code must be 1–4 digits.
 export const validateCountryCode = (v: string): true | string => {
   const s = (v ?? "").trim();

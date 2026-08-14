@@ -117,11 +117,10 @@ export const V1_ROUTES = {
     searchLocations: jwt("GET", "/api/review-system/merchant-stores/search-google-locations")
   },
   cardActivation: {
-    // Statement upload (PUT .../card-activation/statement/upload) is deliberately not
-    // added here — the CLI hands compliance-document uploads to the dashboard (see
-    // `kyb card link`), same as KYB documents; no CLI-side file-upload route needed.
-    status: jwt("GET", "/api/business/:businessId/card-activation"),
-    submit: jwt("POST", "/api/business/:businessId/card-activation")
+    // Read-only from the CLI. Submitting an application, and uploading the bank/card
+    // statements it requires, both happen in the dashboard (see `kyb card link`) — the
+    // CLI reports state and hands off rather than duplicating that wizard.
+    status: jwt("GET", "/api/business/:businessId/card-activation")
   },
   directDebit: {
     // These sit under /api like every other route here; the un-prefixed variants 404 at
