@@ -38,6 +38,7 @@ import {
   validateCountryCode,
   validatePhoneNumber,
   validateVatNumber,
+  normaliseVatNumber,
   validateWebsiteUrl
 } from "../lib/validators";
 import {DEFAULT_PHONE_COUNTRY_CODE} from "../lib/constants";
@@ -407,7 +408,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     }
 
     // VAT is required at signup, matching the dashboard.
-    businessInfo.vatNumber = (await input({message: "VAT number:", validate: validateVatNumber})).trim();
+    businessInfo.vatNumber = normaliseVatNumber(await input({message: "VAT number:", validate: validateVatNumber}));
 
     // Website is optional — blank is sent as undefined (omitted), not an empty string.
     const websiteUrl = (await input({message: "Website URL (optional):", validate: validateWebsiteUrl})).trim();

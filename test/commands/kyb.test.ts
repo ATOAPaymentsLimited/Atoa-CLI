@@ -19,7 +19,6 @@ const mock = vi.hoisted(() => {
     notFoundMessage: "No card application found for this business",
     cardActivationStatusResponse: {status: "IN_REVIEW", paymentType: "ONLINE"} as Record<string, unknown>,
     formatExplicit: true,
-    submitRejectMessage: "" as string,
     buildContext: async (opts: any) => ({
       env: "sandbox",
       http: {
@@ -36,13 +35,6 @@ const mock = vi.hoisted(() => {
               throw new AtoaError(mock.notFoundMessage, "not_found", {status: 404});
             }
             return {status: 200, data: mock.cardActivationStatusResponse, requestId: "r"};
-          }
-          if (req.path === "/api/business/:businessId/card-activation" && req.method === "POST") {
-            if (mock.submitRejectMessage) {
-              const {AtoaError} = await import("../../src/lib/errors");
-              throw new AtoaError(mock.submitRejectMessage, "validation", {status: 400});
-            }
-            return {status: 201, data: {status: "IN_REVIEW", paymentType: req.body?.paymentType}, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
         }
@@ -72,7 +64,7 @@ const browserMock = vi.hoisted(() => ({
 }));
 vi.mock("../../src/lib/browser", () => ({openBrowser: browserMock.openBrowser}));
 
-// Mock @inquirer/prompts so `kyb card submit`'s interactive prompts never wait for real TTY input.
+// Mock @inquirer/prompts so interactive prompts never wait for real TTY input.
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(async ({choices}: any) => choices[0]?.value),
   input: vi.fn(async () => "")
@@ -92,7 +84,6 @@ import kybStatus from "../../src/commands/kyb/status";
 import kybLink from "../../src/commands/kyb/link";
 import kybCardLink from "../../src/commands/kyb/card/link";
 import kybCardStatus from "../../src/commands/kyb/card/status";
-import kybCardSubmit from "../../src/commands/kyb/card/submit";
 import * as prompts from "@inquirer/prompts";
 
 // Pin the dashboard origin so the built URL is deterministic.
@@ -104,7 +95,6 @@ beforeEach(() => {
   mock.notFoundMessage = "No card application found for this business";
   mock.cardActivationStatusResponse = {status: "IN_REVIEW", paymentType: "ONLINE"};
   mock.formatExplicit = true;
-  mock.submitRejectMessage = "";
   browserMock.openBrowser.mockClear();
   configMock.getActiveBusinessId.mockClear();
   configMock.getActiveBusinessId.mockResolvedValue("biz_1");
@@ -267,169 +257,11 @@ describe("kyb card status", () => {
   });
 });
 
-describe("kyb card submit", () => {
-  it("POSTs paymentType plus any provided optional fields", async () => {
-    await (kybCardSubmit.run as any)({
-      args: {paymentType: "online", vat: "GB123456789", maxTransactionAmount: "250"},
-      rawArgs: []
-    });
-    expect(mock.requests).toHaveLength(1);
-    expect(mock.requests[0].method).toBe("POST");
-    expect(mock.requests[0].path).toBe("/api/business/:businessId/card-activation");
-    expect(mock.requests[0].body).toEqual({
-      paymentType: "ONLINE",
-      vatNumber: "GB123456789",
-      maxTransactionAmount: 250
-    });
-    expect(prompts.select).not.toHaveBeenCalled();
-    expect(prompts.input).not.toHaveBeenCalled();
-  });
-
-  it("omits unset optional fields entirely rather than sending empty values", async () => {
-    await (kybCardSubmit.run as any)({args: {paymentType: "IN_STORE"}, rawArgs: []});
-    expect(mock.requests[0].body).toEqual({paymentType: "IN_STORE"});
-  });
-
-  // Regression: these only had a `validate:` on the interactive prompt. Passed as flags they
-  // went straight to Number(), became NaN, and serialised to null — the field was silently
-  // dropped with no warning that the input was rejected.
-  it.each([
-    ["--avg-fulfilment-days", {avgFulfilmentDays: "abc"}],
-    ["--max-transaction-amount", {maxTransactionAmount: "xyz"}]
-  ])("rejects a non-numeric %s instead of sending null", async (_flag, extra) => {
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    await (kybCardSubmit.run as any)({args: {paymentType: "ONLINE", ...extra}, rawArgs: []});
-    stderr.mockRestore();
-    expect(process.exitCode).toBe(3);
-    expect(mock.requests.some((r) => r.method === "POST")).toBe(false);
-  });
-
-  // Regression: the URL pattern was unanchored, so it matched a URL anywhere in the string —
-  // "javascript:alert(1)//www.evil.com" passed because it contains "www.evil.com".
-  it("rejects a javascript: URL that embeds a valid-looking host", async () => {
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    await (kybCardSubmit.run as any)({
-      args: {paymentType: "ONLINE", website: "javascript:alert(1)//www.evil.com"},
-      rawArgs: []
-    });
-    stderr.mockRestore();
-    expect(process.exitCode).toBe(3);
-    expect(mock.requests.some((r) => r.method === "POST")).toBe(false);
-  });
-
-  it("accepts a bare domain and normalises VAT spacing/case", async () => {
-    await (kybCardSubmit.run as any)({
-      args: {paymentType: "ONLINE", website: "acme.co.uk", vat: "gb 123 456 789"},
-      rawArgs: []
-    });
-    expect(mock.requests[0].body).toMatchObject({webSiteUrl: "acme.co.uk", vatNumber: "GB123456789"});
-  });
-
-  it("rejects an invalid --payment-type", async () => {
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    await (kybCardSubmit.run as any)({args: {paymentType: "CARRIER_PIGEON"}, rawArgs: []});
-    expect(process.exitCode).toBe(3);
-    expect(mock.requests).toHaveLength(0);
-    stderr.mockRestore();
-  });
-
-  it("errors non-interactively when --payment-type is missing", async () => {
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    await (kybCardSubmit.run as any)({args: {}, rawArgs: []});
-    expect(process.exitCode).toBe(3);
-    expect(mock.requests).toHaveLength(0);
-    stderr.mockRestore();
-  });
-
-  it("--dryRun does not send a request", async () => {
-    await (kybCardSubmit.run as any)({args: {paymentType: "BOTH", dryRun: true}, rawArgs: []});
-    expect(mock.requests).toHaveLength(0);
-  });
-
-  describe("dashboard hint on dashboard-only preconditions", () => {
-    const runAndCaptureStderr = async (): Promise<string> => {
-      let out = "";
-      const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk: any) => {
-        out += chunk;
-        return true;
-      });
-      await (kybCardSubmit.run as any)({args: {paymentType: "ONLINE"}, rawArgs: []});
-      stderr.mockRestore();
-      return out;
-    };
-
-    it("appends the kyb card link hint when statements are missing", async () => {
-      mock.submitRejectMessage = "Both a bank statement and a card statement are required to submit";
-      const out = await runAndCaptureStderr();
-      expect(out).toContain("Both a bank statement and a card statement are required to submit");
-      expect(out).toContain("atoa kyb card link");
-      expect(process.exitCode).toBe(3);
-    });
-
-    it("appends the hint when KYB is not submitted", async () => {
-      mock.submitRejectMessage = "KYB is not submitted";
-      const out = await runAndCaptureStderr();
-      expect(out).toContain("atoa kyb card link");
-    });
-
-    // The field-validation 400s are fixable with CLI flags — sending the user to the
-    // dashboard for those would be wrong, so the hint must NOT fire.
-    it("does NOT append the hint for field-validation failures", async () => {
-      mock.submitRejectMessage = "Maximum transaction amount is required";
-      const out = await runAndCaptureStderr();
-      expect(out).toContain("Maximum transaction amount is required");
-      expect(out).not.toContain("atoa kyb card link");
-    });
-  });
-
-  describe("interactive (TTY, no --output)", () => {
-    const origTTY = process.stdout.isTTY;
-
-    beforeEach(() => {
-      mock.formatExplicit = false;
-      (process.stdout as any).isTTY = true;
-    });
-
-    afterEach(() => {
-      (process.stdout as any).isTTY = origTTY;
-    });
-
-    it("prompts for every field left unset", async () => {
-      vi.mocked(prompts.select).mockResolvedValueOnce("BOTH");
-      vi.mocked(prompts.input)
-        .mockResolvedValueOnce("https://example.com") // website
-        .mockResolvedValueOnce("") // vat (skipped)
-        .mockResolvedValueOnce("5") // avgFulfilmentDays
-        .mockResolvedValueOnce("100"); // maxTransactionAmount
-
-      await (kybCardSubmit.run as any)({args: {}, rawArgs: []});
-
-      expect(prompts.select).toHaveBeenCalledTimes(1);
-      expect(prompts.input).toHaveBeenCalledTimes(4);
-      expect(mock.requests[0].body).toEqual({
-        paymentType: "BOTH",
-        webSiteUrl: "https://example.com",
-        avgPurchaseFulfilmentDays: 5,
-        maxTransactionAmount: 100
-      });
-    });
-
-    it("does not prompt for fields already supplied as flags", async () => {
-      vi.mocked(prompts.input).mockResolvedValue(""); // vat, avgFulfilmentDays, maxTransactionAmount — all skipped
-      await (kybCardSubmit.run as any)({args: {paymentType: "ONLINE", website: "https://example.com"}, rawArgs: []});
-      expect(prompts.select).not.toHaveBeenCalled();
-      // Only vat, avgFulfilmentDays, maxTransactionAmount are still unset — website was given as a flag.
-      expect(prompts.input).toHaveBeenCalledTimes(3);
-      expect(mock.requests[0].body).toEqual({paymentType: "ONLINE", webSiteUrl: "https://example.com"});
-    });
-  });
-});
-
 describe("kyb card index wiring", () => {
   it("every subCommand thunk resolves to a defined module", async () => {
     const mod = await import("../../src/commands/kyb/card");
     const entries = Object.entries(mod.default.subCommands ?? {});
-    expect(entries.map(([name]) => name)).toEqual(["status", "submit", "link"]);
+    expect(entries.map(([name]) => name)).toEqual(["status", "link"]);
     for (const [name, thunk] of entries) {
       expect(await (thunk as () => Promise<unknown>)(), `${name} should resolve`).toBeDefined();
     }
