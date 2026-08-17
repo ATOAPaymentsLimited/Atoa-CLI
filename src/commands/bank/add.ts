@@ -17,7 +17,7 @@ type BankAddArgs = CommonOptions & {
   setPrimary?: boolean;
 };
 
-/** Subset of the /api/institutions response we use (the dashboard's BankSelect list). */
+/** Subset of the /api/institutions response we use. */
 interface BankInstitution {
   id: string;
   name?: string;
@@ -104,8 +104,8 @@ export default defineCommand({
 });
 
 /**
- * Resolves the bank: `--bank-name` wins; otherwise fetch the supported institutions
- * (the dashboard's BankSelect list) and let the user pick. Returns the name + code to send.
+ * Resolves the bank: `--bank-name` wins; otherwise fetch the supported institutions and let
+ * the user pick. Returns the name + code to send.
  */
 async function pickBank(
   ctx: CommandContext,
@@ -160,7 +160,7 @@ async function collectAccountFields(
   const sortCode = (await required(args.sortCode, "Sort code (6 digits, no spaces):", "Sort code")).replace(/\s+/g, "");
   const accountNumber = await required(args.accountNumber, "Account number (usually 8 digits):", "Account number");
 
-  // Confirm the account number on interactive entry (matches the dashboard's add form).
+  // Confirm the account number on interactive entry — a typo guard.
   if (tty && !args.accountNumber) {
     const reEntered = (await input({message: "Re-enter account number to confirm:"})).trim();
     if (reEntered !== accountNumber) throw new AtoaError("Account numbers do not match.", "validation");

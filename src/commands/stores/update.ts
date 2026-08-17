@@ -2,9 +2,12 @@ import {defineCommand} from "citty";
 import {FormData} from "undici";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAllPages} from "../../lib/list-view";
+import {fetchAllPages, STORES_PAGE_SIZE} from "../../lib/list-view";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
+import {resolveField} from "../../lib/prompt-field";
+import {STORE_FIELDS, normaliseStorePostcode} from "../../lib/validators";
+import t from "../../locales/en.json";
 import type {CommandContext} from "../../lib/context";
 
 type StoresUpdateArgs = CommonOptions & {
@@ -36,10 +39,11 @@ export default defineCommand({
     cityOrTown: {type: "string", description: "city or town"}
   }),
   run: runWithContext<StoresUpdateArgs>(async (ctx, args) => {
+    const interactive = isInteractive(ctx.formatExplicit);
     let storeId = args.storeId?.trim();
 
     if (!storeId) {
-      if (!isInteractive(ctx.formatExplicit)) {
+      if (!interactive) {
         throw new AtoaError("storeId is required (non-interactive)", "validation");
       }
       storeId = await pickStoreId(ctx);
@@ -49,14 +53,36 @@ export default defineCommand({
     const {data: current} = await ctx.http.request({...V1_ROUTES.stores.get, pathParams: {storeId}});
     const existing = (current ?? {}) as StoreFields;
 
+    // On a TTY every field is offered with its current value as the editable default, so
+    // `stores update <id>` with no flags walks the whole record instead of silently no-op'ing.
+    // Values are validated against the same rules `stores add` uses.
+    const resolve = (key: keyof typeof STORE_FIELDS, flag: string, message: string, optional = false) =>
+      resolveField({
+        // Off a TTY an omitted flag keeps the store's current value — an update must not blank
+        // fields the caller never mentioned. On a TTY it is left empty so the field is offered
+        // for editing, with the current value as the default.
+        value: interactive ? args[key] : (args[key] ?? existing[key]),
+        flag,
+        message,
+        rule: STORE_FIELDS[key],
+        interactive,
+        optional,
+        default: existing[key]
+      });
+
+    const locationName = await resolve("locationName", "location-name", t.labelLocationName);
+    const addressLine1 = await resolve("addressLine1", "address-line1", t.labelAddressLine1);
+    const addressLine2 = await resolve("addressLine2", "address-line2", t.labelAddressLine2Optional, true);
+    const cityOrTown = await resolve("cityOrTown", "city-or-town", t.labelTownCity);
+    const addressPostalCode = await resolve("addressPostalCode", "address-postal-code", t.labelPostCode);
+
     const fields: Record<string, string> = {
       id: storeId,
-      locationName: args.locationName?.trim() || existing.locationName || "",
-      addressLine1: args.addressLine1?.trim() || existing.addressLine1 || "",
-      addressPostalCode: args.addressPostalCode?.trim() || existing.addressPostalCode || "",
-      cityOrTown: args.cityOrTown?.trim() || existing.cityOrTown || ""
+      locationName: locationName ?? "",
+      addressLine1: addressLine1 ?? "",
+      addressPostalCode: normaliseStorePostcode(addressPostalCode ?? ""),
+      cityOrTown: cityOrTown ?? ""
     };
-    const addressLine2 = args.addressLine2?.trim() ?? existing.addressLine2;
     if (addressLine2) fields.addressLine2 = addressLine2;
 
     if (ctx.dryRun) {
@@ -67,19 +93,16 @@ export default defineCommand({
     const form = new FormData();
     for (const [key, value] of Object.entries(fields)) form.append(key, value);
 
-    try {
-      const {data} = await ctx.http.request({...V1_ROUTES.stores.upsert, rawBody: form});
-      const store = (data ?? {}) as StoreFields;
-      ctx.print({id: store.id, locationName: store.locationName});
-    } catch (err) {
-      throw withUpgradeHint(err);
-    }
+    // ADDON_UPGRADE_REQUIRED is classified and hinted centrally in lib/errors.ts.
+    const {data} = await ctx.http.request({...V1_ROUTES.stores.upsert, rawBody: form});
+    const store = (data ?? {}) as StoreFields;
+    ctx.print({id: store.id, locationName: store.locationName});
   })
 });
 
 /** TTY-only: list stores and let the user pick one, returning its id. */
 async function pickStoreId(ctx: CommandContext): Promise<string> {
-  const rows = (await fetchAllPages(ctx, V1_ROUTES.stores.list)) as StoreFields[];
+  const rows = (await fetchAllPages(ctx, V1_ROUTES.stores.list, {}, STORES_PAGE_SIZE)) as StoreFields[];
   if (rows.length === 0) throw new AtoaError("no stores found for this business", "not_found");
 
   const {select} = await import("@inquirer/prompts");
@@ -93,17 +116,4 @@ async function pickStoreId(ctx: CommandContext): Promise<string> {
   });
   if (!storeId) throw new AtoaError("no store selected", "validation");
   return storeId;
-}
-
-/** MULTI_STORE addon-limit hit — see stores/add.ts for the same handling. */
-function withUpgradeHint(err: unknown): unknown {
-  if (err instanceof AtoaError && err.errorCode === "ADDON_UPGRADE_REQUIRED") {
-    return new AtoaError(`${err.message} — run 'atoa addons list' to see plan/store limits`, err.kind, {
-      status: err.status,
-      errorCode: err.errorCode,
-      requestId: err.requestId,
-      additionalData: err.additionalData
-    });
-  }
-  return err;
 }

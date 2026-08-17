@@ -4,8 +4,7 @@ import {openBrowser} from "../../../lib/browser";
 import {resolveDashboardUrl} from "../../../lib/env";
 import {getActiveBusinessId} from "../../../lib/config-store";
 import {AtoaError} from "../../../lib/errors";
-
-type LinkArgs = CommonOptions & {open?: boolean};
+import {fetchKybStatus, assertKybSubmitted} from "../_shared";
 
 /**
  * Builds the card-signup dashboard deep-link CLI-side. Same shape as
@@ -23,18 +22,9 @@ function buildCardSignupUrl(businessId: string): string {
 }
 
 export default defineCommand({
-  meta: {
-    name: "link",
-    description: "Get the card-signup dashboard deep-link for an already-KYB'd merchant (optionally open in browser)"
-  },
-  args: withCommonArgs({
-    open: {
-      type: "boolean",
-      default: true,
-      description: "open the URL in the default browser (--no-open to just print it)"
-    }
-  }),
-  run: runWithContext<LinkArgs>(async (ctx, args) => {
+  meta: {name: "link", description: "Open card signup in the browser for an already-KYB'd merchant"},
+  args: withCommonArgs({}),
+  run: runWithContext<CommonOptions>(async (ctx) => {
     const businessId = await getActiveBusinessId(ctx.profileName);
     if (!businessId) {
       throw new AtoaError(
@@ -46,15 +36,17 @@ export default defineCommand({
     const url = buildCardSignupUrl(businessId);
 
     if (ctx.dryRun) {
-      ctx.print({url, open: args.open ?? true});
+      ctx.print({url});
       return;
     }
 
-    if (args.open ?? true) {
-      const opened = await openBrowser(url);
-      if (!opened) {
-        process.stderr.write("Could not open a browser automatically — open the URL below manually.\n");
-      }
+    // Checked before opening: /card-signup silently redirects an unsubmitted merchant to /home,
+    // so an unguarded handoff looks like a dead link. Refuse with the real precondition instead.
+    assertKybSubmitted(await fetchKybStatus(ctx));
+
+    const opened = await openBrowser(url);
+    if (!opened) {
+      process.stderr.write("Could not open a browser automatically — open the URL below manually.\n");
     }
 
     ctx.print({url});

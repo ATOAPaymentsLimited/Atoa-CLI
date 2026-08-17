@@ -63,6 +63,9 @@ export const V1_ROUTES = {
   staff: {
     list: jwt("GET", "/api/business/:businessId/users/"),
     create: jwt("POST", "/api/business/:businessId/users/"),
+    // `:userId` is the person's user id, not the business-user link id — the backend refuses
+    // when it matches the caller's own id, which only makes sense against the former.
+    update: jwt("PUT", "/api/business/:businessId/users/:userId"),
     remove: jwt("DELETE", "/api/business/:businessId/users/:userId")
   },
   roles: {
@@ -98,23 +101,6 @@ export const V1_ROUTES = {
     upgrade: jwt("POST", "/api/addonPlan/merchant/:businessId/upgrade/:addonPlanId"),
     downgrade: jwt("POST", "/api/addonPlan/merchant/:businessId/downgrade/:addonPlanId"),
     cancelDowngrade: jwt("DELETE", "/api/addonPlan/merchant/:businessId/cancelDowngrade")
-  },
-  googleReview: {
-    // Review endpoints sit under /api/review-system. Not yet exercised against a live
-    // deployment. "Google" is hardcoded rather than a :platform token since this CLI
-    // group is Google-only, matching its own command-group scope.
-    config: jwt("GET", "/api/review-system/merchant-business-config/v1/:businessId/Google"),
-    linkAccount: jwt("PUT", "/api/review-system/merchant-business-config/merchant/:businessId/link-business-account"),
-    unlinkConfig: jwt("DELETE", "/api/review-system/merchant-business-config/merchant/:businessId/Google"),
-    accounts: jwt("GET", "/api/review-system/review-platform/:businessId/Google/accounts"),
-    accountLocations: jwt("GET", "/api/review-system/review-platform/:businessId/Google/:businessAccountId/locations"),
-    storeLocations: jwt("GET", "/api/review-system/merchant-stores/:businessId/Google"),
-    linkLocation: jwt("POST", "/api/review-system/merchant-stores/:businessId/Google/link-location"),
-    unlinkLocation: jwt(
-      "DELETE",
-      "/api/review-system/merchant-stores/:businessId/Google/unlink-location/:merchantStoreId"
-    ),
-    searchLocations: jwt("GET", "/api/review-system/merchant-stores/search-google-locations")
   },
   cardActivation: {
     // Read-only from the CLI. Submitting an application, and uploading the bank/card

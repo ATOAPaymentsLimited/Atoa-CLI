@@ -164,7 +164,9 @@ describe("stores add", () => {
         locationName: "New Store",
         addressLine1: "1 Test Rd",
         cityOrTown: "London",
-        addressPostalCode: "SW1 1AA"
+        // Space stripped: the dashboard's postcode input blocks the space key, so this is
+        // the value that form would have produced.
+        addressPostalCode: "SW11AA"
       });
       expect(printed.body.addressLine2).toBeUndefined();
     });
@@ -185,7 +187,46 @@ describe("stores add", () => {
 
       expect(prompts.input).toHaveBeenCalledTimes(1);
       const printed = mock.getPrinted() as any;
-      expect(printed.body.addressPostalCode).toBe("SW1 1AA");
+      expect(printed.body.addressPostalCode).toBe("SW11AA");
+    });
+
+    it("re-prompts instead of aborting when a flag value fails the dashboard's rule", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      vi.mocked(prompts.input).mockResolvedValueOnce("New Store"); // replacement locationName
+
+      await (storesAdd.run as any)({
+        args: {
+          locationName: "ab", // under the 3-character minimum
+          addressLine1: "1 Test Rd",
+          addressPostalCode: "SW11AA",
+          cityOrTown: "London",
+          dryRun: true
+        },
+        rawArgs: []
+      });
+
+      expect(prompts.input).toHaveBeenCalledTimes(1);
+      expect((mock.getPrinted() as any).body.locationName).toBe("New Store");
+      stderr.mockRestore();
+    });
+
+    it('rejects the reserved store name "default"', async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      vi.mocked(prompts.input).mockResolvedValueOnce("Real Store");
+
+      await (storesAdd.run as any)({
+        args: {
+          locationName: "Default",
+          addressLine1: "1 Test Rd",
+          addressPostalCode: "SW11AA",
+          cityOrTown: "London",
+          dryRun: true
+        },
+        rawArgs: []
+      });
+
+      expect(prompts.input).toHaveBeenCalledTimes(1);
+      stderr.mockRestore();
     });
 
     it("does not prompt at all when every flag is already provided", async () => {

@@ -63,6 +63,7 @@ beforeEach(() => {
   process.exitCode = 0;
 });
 
+// No country/state — those are fixed to GB/UK on the wire rather than collected.
 const FULL_ARGS = {
   sortCode: "123456",
   accountNumber: "12345678",
@@ -70,8 +71,7 @@ const FULL_ARGS = {
   email: "billing@acme.example",
   addressLine1: "1 Test Rd",
   city: "London",
-  postalCode: "SW1 1AA",
-  country: "GB"
+  postalCode: "SW11AA"
 };
 
 describe("direct-debit status", () => {
@@ -86,9 +86,22 @@ describe("direct-debit status", () => {
 describe("direct-debit setup", () => {
   it("errors (exit 3) when a required field is missing on a non-TTY run", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const {country: _country, ...incomplete} = FULL_ARGS;
+    const {city: _city, ...incomplete} = FULL_ARGS;
     await (directDebitSetup.run as any)({args: incomplete, rawArgs: []});
     expect(process.exitCode).toBe(3);
+    stderr.mockRestore();
+  });
+
+  it.each([
+    ["accountNumber", "1234567"],
+    ["sortCode", "12345"],
+    ["email", "not-an-email"],
+    ["name", "a name that is very much longer than twenty"]
+  ])("errors (exit 3) on an invalid %s", async (field, value) => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (directDebitSetup.run as any)({args: {...FULL_ARGS, [field]: value}, rawArgs: []});
+    expect(process.exitCode).toBe(3);
+    expect(mock.requests.some((r) => r.method === "POST")).toBe(false);
     stderr.mockRestore();
   });
 
@@ -97,10 +110,21 @@ describe("direct-debit setup", () => {
     const postReq = mock.requests.find((r) => r.method === "POST");
     expect(postReq).toBeDefined();
     expect(postReq!.body.payment_method_data.bacs_debit).toMatchObject({
+      type: "bacs_debit",
       sort_code: "123456",
       account_number: "12345678"
     });
     expect(postReq!.body.updateBacs).toBe(false);
+  });
+
+  it("hardcodes the GB/UK address pair the dashboard sends, and strips postcode spaces", async () => {
+    await (directDebitSetup.run as any)({args: {...FULL_ARGS, postalCode: "SW1 1AA"}, rawArgs: []});
+    const postReq = mock.requests.find((r) => r.method === "POST");
+    expect(postReq!.body.payment_method_data.billing_details.address).toMatchObject({
+      country: "GB",
+      state: "UK",
+      postal_code: "SW11AA"
+    });
   });
 
   it("errors (exit 3) on a non-TTY run when a mandate is already active (needs interactive confirm)", async () => {

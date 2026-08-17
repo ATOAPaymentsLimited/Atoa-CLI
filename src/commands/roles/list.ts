@@ -2,6 +2,7 @@ import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages, presentList} from "../../lib/list-view";
+import {projectRole} from "./_shared";
 
 export default defineCommand({
   meta: {name: "list", description: "List available roles for this business"},
@@ -12,8 +13,9 @@ export default defineCommand({
       return;
     }
 
-    // fetchAllPages unwraps the Pagination envelope and pages through it.
-    const rows = await fetchAllPages(ctx, V1_ROUTES.roles.list);
+    // fetchAllPages unwraps the Pagination envelope and pages through it. Projected before
+    // display so the drill-in shows permission names rather than the nested catalogue records.
+    const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)).map((r) => projectRole(r as never));
     await presentList(ctx, rows, {
       title: "Roles",
       line: (r) => [r["name"], r["roleScopeType"], r["description"]].filter(Boolean).join("  ·  ")

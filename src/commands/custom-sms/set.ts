@@ -2,6 +2,7 @@ import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
+import {validateSmsSenderName} from "../../lib/validators";
 import {fetchCustomSenderName} from "./_shared";
 
 type SmsNameSetArgs = CommonOptions & {name: string};
@@ -12,8 +13,11 @@ export default defineCommand({
     name: {type: "positional", required: true, description: "custom SMS sender name"}
   }),
   run: runWithContext<SmsNameSetArgs>(async (ctx, args) => {
-    const customSmsName = args.name?.trim();
-    if (!customSmsName) throw new AtoaError("name is required", "validation");
+    const customSmsName = args.name?.trim() ?? "";
+    // 3–11 characters, alphanumeric plus spaces. The ceiling is the carriers' alphanumeric
+    // sender-ID limit, so a longer name is rejected at send time rather than here.
+    const verdict = validateSmsSenderName(customSmsName);
+    if (verdict !== true) throw new AtoaError(verdict, "validation");
 
     if (ctx.dryRun) {
       ctx.print({note: "checks for an existing sender name first, then creates or updates", customSmsName});

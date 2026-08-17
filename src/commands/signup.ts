@@ -304,6 +304,44 @@ async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Pr
   return {kind: "start", fromStep: 1, startingNew: true};
 }
 
+/**
+ * Consent for the Privacy Policy, Terms of Service and marketing updates.
+ *
+ * Asked as one accept-all question that covers all three, falling back to asking each in turn
+ * when it is declined — so a merchant who wants to accept everything answers once, and one who
+ * does not still gets to choose per item. Only the Privacy Policy and Terms of Service gate
+ * onboarding; marketing stays optional either way, and defaults to off when asked on its own.
+ *
+ * Returns the marketing preference. The two required ones throw rather than return.
+ */
+async function collectConsent(): Promise<boolean> {
+  const acceptAll = await confirm({
+    message:
+      "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/) " +
+      "and Terms of Service (https://paywithatoa.co.uk/terms/), and would like marketing and product updates",
+    default: true
+  });
+  if (acceptAll) return true;
+
+  const acceptPrivacy = await confirm({
+    message: "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/)",
+    default: true
+  });
+  if (!acceptPrivacy) {
+    throw new AtoaError("You must accept the Privacy Policy to continue.", "validation");
+  }
+
+  const acceptTos = await confirm({
+    message: "I accept Atoa's Terms of Service (https://paywithatoa.co.uk/terms/)",
+    default: true
+  });
+  if (!acceptTos) {
+    throw new AtoaError("You must accept the Terms of Service to continue.", "validation");
+  }
+
+  return confirm({message: "I would like to get marketing and product updates from Atoa", default: false});
+}
+
 /** The onboarding wizard (steps 1–4), run with an authed context. */
 async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<void> {
   // Wizard is interactive-only
@@ -375,7 +413,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     const legalBusinessName = await input({message: "Business name:", validate: validateBusinessName});
 
     // Industry / business type is a server-side lookup (env-specific ids); fetch and pick.
-    // Deduplicated by name like the dashboard's merchant store does — the table carries
+    // Deduplicated by name — the table carries
     // duplicate rows (several literal "New Type" test entries), which otherwise fill the picker.
     const types = (await ctx.http.request({...V1_ROUTES.onboarding.businessTypes})).data as Array<{
       id: string;
@@ -387,8 +425,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
       const uniqueTypes = types.filter((t) => !seen.has(t.name) && seen.add(t.name));
       const id = await search({
         message: "Business industry:",
-        // The dashboard's industry dropdown is type-to-filter; `search` is the closest
-        // equivalent, and the list is long enough that a plain select is unusable.
+        // Type-to-filter: the list is long enough that a plain select is unusable.
         source: (term) => {
           const q = (term ?? "").toLowerCase();
           return uniqueTypes.filter((t) => t.name.toLowerCase().includes(q)).map((t) => ({value: t.id, name: t.name}));
@@ -397,8 +434,8 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
       businessType = uniqueTypes.find((t) => t.id === id);
     }
 
-    // Monthly turnover — server-defined bands. The display string itself is what's persisted
-    // (same as the dashboard). Required here, matching the dashboard's step 1.
+    // Monthly turnover — server-defined bands. The display string itself is what's persisted.
+    // Required, and collected in step 1.
     const ranges = (await ctx.http.request({...V1_ROUTES.onboarding.transactionRanges})).data as string[];
     if (ranges.length) {
       businessInfo.averageMonthlyTransaction = await select({
@@ -407,28 +444,14 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
       });
     }
 
-    // VAT is required at signup, matching the dashboard.
+    // VAT is required at signup.
     businessInfo.vatNumber = normaliseVatNumber(await input({message: "VAT number:", validate: validateVatNumber}));
 
     // Website is optional — blank is sent as undefined (omitted), not an empty string.
     const websiteUrl = (await input({message: "Website URL (optional):", validate: validateWebsiteUrl})).trim();
     if (websiteUrl) businessInfo.webSiteUrl = websiteUrl;
 
-    // Consent. Privacy Policy + Terms of Service are required; marketing updates are an optional opt-in.
-    const acceptPrivacy = await confirm({
-      message: "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/)"
-    });
-    if (!acceptPrivacy) {
-      throw new AtoaError("You must accept the Privacy Policy to continue.", "validation");
-    }
-    const acceptTos = await confirm({message: "I accept Atoa's Terms of Service (https://paywithatoa.co.uk/terms/)"});
-    if (!acceptTos) {
-      throw new AtoaError("You must accept the Terms of Service to continue.", "validation");
-    }
-    const allowMarketingEmails = await confirm({
-      message: "I would like to get marketing and product updates from Atoa.",
-      default: false
-    });
+    const allowMarketingEmails = await collectConsent();
 
     businessInfo.legalBusinessName = legalBusinessName;
     businessInfo.tradingName = legalBusinessName;
@@ -519,7 +542,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     }
 
     // Business address (part of businessInfo — resend the full accumulator).
-    // Field order matches the dashboard's step 3: postcode, then line 1, then line 2.
+    // Postcode first, then line 1, then line 2 — the order the address is usually looked up in.
     const addressPostalCode = (
       await input({message: "Postal code:", transformer: (v) => v.toUpperCase(), validate: validatePostcode})
     ).toUpperCase();
@@ -534,9 +557,8 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     process.stderr.write("✓ Business contact details saved.\n");
   }
 
-  // Step 4 ("how did you hear about us" / sourceOfInstall) was removed to match the current
-  // dashboard flow, which dropped that step; turnover moved up into step 1. The signupSources
-  // route record is now unused by this wizard.
+  // Step 4 ("how did you hear about us" / sourceOfInstall) was removed from the flow and
+  // turnover moved up into step 1. The signupSources route record is now unused by this wizard.
   process.stderr.write("\n✓ Onboarding complete.\n");
 
   const bizId = await getActiveBusinessId(ctx.profileName);

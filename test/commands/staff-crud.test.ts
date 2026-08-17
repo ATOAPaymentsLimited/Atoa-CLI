@@ -1,4 +1,4 @@
-import {describe, it, expect, vi, beforeEach} from "vitest";
+﻿import {describe, it, expect, vi, beforeEach} from "vitest";
 
 const mock = vi.hoisted(() => {
   const requests: Array<{method: string; path: string; auth?: string; query?: any; body?: any; pathParams?: any}> = [];
@@ -54,7 +54,7 @@ vi.mock("../../src/lib/context", async () => {
 });
 
 import staffAdd from "../../src/commands/staff/add";
-import staffRemove from "../../src/commands/staff/remove";
+import staffRemove from "../../src/commands/staff/delete";
 
 beforeEach(() => {
   mock.reset();

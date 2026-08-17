@@ -5,7 +5,7 @@ import {AtoaError} from "../../lib/errors";
 import {fetchCustomSenderName} from "./_shared";
 
 export default defineCommand({
-  meta: {name: "remove", description: "Remove the custom SMS sender name for this business"},
+  meta: {name: "delete", description: "Delete the custom SMS sender name for this business"},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     const existing = await fetchCustomSenderName(ctx);

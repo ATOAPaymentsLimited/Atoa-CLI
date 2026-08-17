@@ -11,15 +11,24 @@ type Route = {method: HttpMethod; path: string; auth: AuthMode};
  *   pages until we've collected `totalCount` rows.
  * - Bare-array endpoints (no pagination) pass straight through on the first request.
  */
+export const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * Stores are fetched 200 at a time. The loop pages through everything at any size, but stores
+ * are the list most often read whole — every store picker loads the full set — so the larger
+ * page saves round-trips where it actually shows.
+ */
+export const STORES_PAGE_SIZE = 200;
+
 export async function fetchAllPages(
   ctx: CommandContext,
   route: Route,
-  baseQuery: Record<string, string> = {}
+  baseQuery: Record<string, string> = {},
+  size: number = DEFAULT_PAGE_SIZE
 ): Promise<unknown[]> {
-  const SIZE = 50;
   const all: unknown[] = [];
   for (let page = 0; page < 1000; page++) {
-    const {data} = await ctx.http.request({...route, query: {...baseQuery, page: String(page), size: String(SIZE)}});
+    const {data} = await ctx.http.request({...route, query: {...baseQuery, page: String(page), size: String(size)}});
     if (Array.isArray(data)) return data; // endpoint isn't paginated — already the full list
     const env = (data ?? {}) as {data?: unknown[]; totalCount?: number};
     const rows = Array.isArray(env.data) ? env.data : [];

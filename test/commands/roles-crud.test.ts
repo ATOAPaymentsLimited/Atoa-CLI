@@ -1,4 +1,4 @@
-import {describe, it, expect, vi, beforeEach} from "vitest";
+﻿import {describe, it, expect, vi, beforeEach} from "vitest";
 
 const mock = vi.hoisted(() => {
   const requests: Array<{method: string; path: string; auth?: string; query?: any; body?: any; pathParams?: any}> = [];
@@ -66,7 +66,7 @@ vi.mock("../../src/lib/context", async () => {
   return {...actual, buildContext: mock.buildContext};
 });
 
-import rolesCreate from "../../src/commands/roles/create";
+import rolesCreate from "../../src/commands/roles/add";
 import rolesUpdate from "../../src/commands/roles/update";
 import rolesDelete from "../../src/commands/roles/delete";
 
@@ -75,15 +75,19 @@ beforeEach(() => {
   process.exitCode = 0;
 });
 
-describe("roles create", () => {
+describe("roles add", () => {
+  // A GET precedes the POST: existing role names are read so the dashboard's
+  // case-insensitive duplicate rule can be applied before creating anything.
+  const postOf = (reqs: Array<{method: string}>) => reqs.find((r) => r.method === "POST");
+
   it("POSTs with name, description, and repeated --permission flags", async () => {
     await (rolesCreate.run as any)({
       args: {name: "New Role", description: "desc"},
       rawArgs: ["--permission", "perm_1", "--permission", "perm_2"]
     });
-    expect(mock.requests).toHaveLength(1);
-    expect(mock.requests[0].method).toBe("POST");
-    expect(mock.requests[0].body).toMatchObject({
+    const post = postOf(mock.requests as any);
+    expect(post).toBeDefined();
+    expect((post as any).body).toMatchObject({
       name: "New Role",
       description: "desc",
       permissionIds: ["perm_1", "perm_2"]
@@ -92,7 +96,15 @@ describe("roles create", () => {
 
   it("omits permissionIds when no --permission flags are given", async () => {
     await (rolesCreate.run as any)({args: {name: "New Role"}, rawArgs: []});
-    expect(mock.requests[0].body).not.toHaveProperty("permissionIds");
+    expect((postOf(mock.requests as any) as any).body).not.toHaveProperty("permissionIds");
+  });
+
+  it("errors (exit 3) on a name shorter than the dashboard's 3-character minimum", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    await (rolesCreate.run as any)({args: {name: "ab"}, rawArgs: []});
+    expect(process.exitCode).toBe(3);
+    expect(postOf(mock.requests as any)).toBeUndefined();
+    stderr.mockRestore();
   });
 
   it("errors (exit 3) when --name is missing on a non-TTY run", async () => {

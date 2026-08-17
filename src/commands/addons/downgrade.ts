@@ -83,8 +83,17 @@ export default defineCommand({
     }
 
     try {
-      const {data} = await ctx.http.request({...V1_ROUTES.addons.downgrade, pathParams: {addonPlanId: target.id}});
-      ctx.print(data ?? {downgradeScheduled: target.name});
+      await ctx.http.request({...V1_ROUTES.addons.downgrade, pathParams: {addonPlanId: target.id}});
+      // The endpoint echoes the whole plan record back. A merchant who just confirmed a
+      // downgrade wants to know it is scheduled and when it lands — not to re-read the plan.
+      ctx.print({
+        status: "Downgrade scheduled",
+        from: current.addonPlan?.name,
+        to: target.name,
+        monthlyAmount: target.monthlyAmount,
+        effectiveFrom: estimate.downgradeDate,
+        estimatedCharges: estimate.estimatedCharges
+      });
     } catch (err) {
       throw withBlockerDetail(err, blockers);
     }

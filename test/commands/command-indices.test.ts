@@ -18,9 +18,8 @@ const INDICES = [
   "stores",
   "webhooks",
   "addons",
-  "google-review",
-  "branding",
-  "sms-name",
+  "custom-branding",
+  "custom-sms",
   "direct-debit",
   "comms"
 ];

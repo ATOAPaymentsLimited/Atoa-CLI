@@ -29,10 +29,59 @@ describe("exitCodeFor", () => {
     ["not_found", 4],
     ["rate_limit", 5],
     ["network", 6],
+    ["plan_limit", 8],
     ["generic", 1],
     [undefined, 1]
   ] as const)("%s → %d", (kind, code) => {
     expect(exitCodeFor(kind as any)).toBe(code);
+  });
+});
+
+/**
+ * An addon-plan refusal arrives as a 403 carrying the human headline in `title` and the addon's
+ * marketing copy in `message`. Read naively that produced, for `atoa stores add`:
+ *
+ *   error: Manage multiple store locations efficiently and gain flexibility to add employees
+ *   and bank accounts. — run 'atoa login' to (re-)authenticate
+ */
+describe("ADDON_UPGRADE_REQUIRED", () => {
+  const body = {
+    name: "ADDON_UPGRADE_REQUIRED",
+    title: "Upgrade to add more stores",
+    message: "Manage multiple store locations efficiently and gain flexibility to add employees.",
+    status: 403
+  };
+
+  it("is a plan limit, not a forbidden/auth failure", () => {
+    const err = mapHttpResponse(403, body, "req-1");
+    expect(err.kind).toBe("plan_limit");
+    expect(exitCodeFor(err.kind)).toBe(8);
+  });
+
+  it("leads with the title and keeps the description as detail", () => {
+    const err = mapHttpResponse(403, body, "req-1");
+    expect(err.message).toBe("Upgrade to add more stores");
+    expect(err.detail).toBe(body.message);
+  });
+
+  it("hints at the addon commands and never at re-authenticating", () => {
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk: any) => {
+      out += chunk;
+      return true;
+    });
+    printError(mapHttpResponse(403, body, "req-1"), {authMode: "jwt"});
+    stderr.mockRestore();
+
+    expect(out).toContain("atoa addons upgrade");
+    expect(out).not.toContain("atoa login");
+    expect(out).toContain("Upgrade to add more stores");
+  });
+
+  it("leaves an ordinary 403 classified as forbidden with the login hint", () => {
+    const err = mapHttpResponse(403, {message: "Forbidden"}, "req-2");
+    expect(err.kind).toBe("forbidden");
+    expect(err.detail).toBeUndefined();
   });
 });
 

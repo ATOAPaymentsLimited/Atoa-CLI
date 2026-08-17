@@ -1,9 +1,9 @@
 /**
  * Output formatting: --output json | table | yaml.
  *
- * Default: json. `resolveFormat(undefined)` returns "json" unconditionally —
- * machines and humans both get JSON unless they ask for table/yaml. Errors
- * always go to stderr; data always to stdout.
+ * Default: table. `resolveFormat(undefined)` returns "table" — a raw JSON dump is not a
+ * readable answer to `atoa stores list`. Scripts opt into `--output json` explicitly.
+ * Errors always go to stderr; data always to stdout.
  */
 
 import Table from "cli-table3";
@@ -53,7 +53,7 @@ export function renderKeyValues(heading: string, rows: Array<[string, string | u
 export function resolveFormat(requested: string | undefined): OutputFormat {
   if (requested === "json" || requested === "table" || requested === "yaml") return requested;
   if (requested) throw new Error(`Invalid --output value '${requested}'. Use json|table|yaml.`);
-  return "json";
+  return "table";
 }
 
 export function print(data: unknown, format: OutputFormat): void {
@@ -71,6 +71,19 @@ export function print(data: unknown, format: OutputFormat): void {
   }
 }
 
+/** Shown in place of a value the server left empty, so a blank cell is never ambiguous. */
+export const EMPTY_VALUE = "N/A";
+
+/**
+ * Width to lay tables out in. `process.stdout.columns` is absent when piped, so a laptop-ish
+ * default is used — the point is that a long value wraps onto the next line inside its cell
+ * instead of overflowing and breaking the table's borders.
+ */
+function tableWidth(): number {
+  const cols = process.stdout.columns ?? 0;
+  return cols > 40 ? Math.min(cols, 160) : 100;
+}
+
 function renderTable(data: unknown): string {
   if (Array.isArray(data)) {
     if (data.length === 0) return "(no rows)";
@@ -79,20 +92,52 @@ function renderTable(data: unknown): string {
       return data.map((v) => stripControlChars(String(v))).join("\n");
     }
     const cols = Object.keys(first as object);
-    const t = new Table({head: cols.map(stripControlChars)});
+    // Split the width evenly, with a floor so a wide row degrades into wrapped cells
+    // rather than unreadable slivers.
+    const per = Math.max(12, Math.floor((tableWidth() - cols.length - 1) / cols.length));
+    const t = new Table({
+      head: cols.map(stripControlChars),
+      colWidths: cols.map(() => per),
+      wordWrap: true,
+      // Hard-wrap rather than break on spaces: on word boundaries cli-table3 truncates any
+      // token wider than the column, which would silently drop the tail of an id.
+      wrapOnWordBoundary: false
+    });
     for (const row of data as Array<Record<string, unknown>>) {
       t.push(cols.map((c) => stringify(row[c])));
     }
     return t.toString();
   }
   if (typeof data === "object" && data !== null) {
-    const t = new Table();
-    for (const [k, v] of Object.entries(data)) {
+    const rows = flatten(data as Record<string, unknown>);
+    if (rows.length === 0) return "(no fields)";
+    const keyWidth = Math.min(Math.max(...rows.map(([k]) => k.length)) + 2, 34);
+    const valueWidth = Math.max(20, tableWidth() - keyWidth - 3);
+    const t = new Table({colWidths: [keyWidth, valueWidth], wordWrap: true, wrapOnWordBoundary: false});
+    for (const [k, v] of rows) {
       t.push({[k]: stringify(v)});
     }
     return t.toString();
   }
   return stripControlChars(String(data));
+}
+
+/**
+ * Flattens nested objects into dotted keys, so a detail view stays a table of scalars
+ * rather than a table with a JSON blob wedged into a single cell. Arrays are left to
+ * `stringify` — a cell can't hold a sub-table, and the dotted form would be worse.
+ */
+function flatten(obj: Record<string, unknown>, prefix = ""): Array<[string, unknown]> {
+  const out: Array<[string, unknown]> = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      out.push(...flatten(v as Record<string, unknown>, key));
+    } else {
+      out.push([key, v]);
+    }
+  }
+  return out;
 }
 
 export function stripControlChars(s: string): string {
@@ -107,8 +152,25 @@ export function stripControlChars(s: string): string {
   return out;
 }
 
+/**
+ * Cell text. Anything the server left empty renders as N/A rather than a blank cell — a blank
+ * one reads as "the CLI failed to show this" instead of "there is nothing here". Only the table
+ * view substitutes; `--output json` keeps the original value so scripting is unaffected.
+ */
 function stringify(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  if (typeof v === "object") return JSON.stringify(v);
-  return stripControlChars(String(v));
+  if (v === null || v === undefined) return EMPTY_VALUE;
+  if (Array.isArray(v)) {
+    if (v.length === 0) return EMPTY_VALUE;
+    // A list of plain values reads far better comma-separated than as a JSON array. Only the
+    // table view does this; `--output json` keeps the array, so scripting is unaffected.
+    if (v.every((item) => item === null || typeof item !== "object")) {
+      return v.map((item) => stripControlChars(String(item))).join(", ");
+    }
+    return JSON.stringify(v);
+  }
+  if (typeof v === "object") {
+    return Object.keys(v as object).length === 0 ? EMPTY_VALUE : JSON.stringify(v);
+  }
+  const s = stripControlChars(String(v));
+  return s.trim() === "" ? EMPTY_VALUE : s;
 }

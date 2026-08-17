@@ -8,28 +8,21 @@ const GRANT_URL =
   "&redirect_uri=http%3A%2F%2F127.0.0.1%3A54407%2Fcallback&device_name=DESKTOP-418JESC";
 
 describe("openerFor", () => {
-  it("win32: PowerShell -EncodedCommand carries the whole URL intact (no cmd `&`/quote hazards)", () => {
-    const {command, args} = openerFor("win32", GRANT_URL);
-    expect(command).toBe("powershell");
-    expect(args.slice(0, 5)).toEqual([
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-EncodedCommand"
-    ]);
-
-    // The payload must decode (UTF-16LE) back to a single Start-Process for the full URL —
-    // every `&` survives, nothing is truncated or escaped away.
-    const decoded = Buffer.from(args[5], "base64").toString("utf16le");
-    expect(decoded).toBe(`Start-Process '${GRANT_URL}'`);
-    expect(decoded).toContain("&code_challenge=");
-    expect(decoded).toContain("&redirect_uri=");
+  // The shell's protocol handler, invoked directly. No command interpreter parses this, so the
+  // URL crosses as one argv entry — the `&` separators and quotes need no escaping at all.
+  //
+  // The opener this replaced (`powershell -EncodedCommand "Start-Process <url>"`) exited 0
+  // without launching anything, so success could not be distinguished from silent failure.
+  it("win32: hands the whole URL to the protocol handler as a single argument", () => {
+    expect(openerFor("win32", GRANT_URL)).toEqual({
+      command: "rundll32",
+      args: ["url.dll,FileProtocolHandler", GRANT_URL]
+    });
   });
 
-  it("win32: doubles single quotes so a URL with `'` can't break out of the PS string", () => {
-    const decoded = Buffer.from(openerFor("win32", "https://x/?a='b").args[5], "base64").toString("utf16le");
-    expect(decoded).toBe("Start-Process 'https://x/?a=''b'");
+  it("win32: passes a URL containing a quote through unaltered", () => {
+    const url = "https://x/?a='b";
+    expect(openerFor("win32", url).args[1]).toBe(url);
   });
 
   it("darwin: bare URL via `open`", () => {
