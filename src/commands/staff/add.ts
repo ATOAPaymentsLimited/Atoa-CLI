@@ -1,9 +1,13 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAllPages} from "../../lib/list-view";
+import {fetchAllPages, STORES_PAGE_SIZE} from "../../lib/list-view";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
+import {validateStaffName, isValidEmail, validateCountryCode, validatePhoneNumber} from "../../lib/validators";
+import {DEFAULT_PHONE_COUNTRY_CODE} from "../../lib/constants";
+import t from "../../locales/en.json";
+import {projectStaff, parseRepeatedFlag} from "./_shared";
 import type {CommandContext} from "../../lib/context";
 
 type StaffAddArgs = CommonOptions & {
@@ -50,16 +54,17 @@ export default defineCommand({
       }
 
       const {input} = await import("@inquirer/prompts");
-      if (!firstName) firstName = (await input({message: "First name"})).trim();
-      if (!lastName) lastName = (await input({message: "Last name"})).trim();
+      if (!firstName) {
+        firstName = (await input({message: t.labelFirstName, validate: validateStaffName("first")})).trim();
+      }
+      if (!lastName) {
+        lastName = (await input({message: t.labelLastName, validate: validateStaffName("last")})).trim();
+      }
       if (!hasContact()) {
-        const emailAnswer = (await input({message: "Email (leave blank to use a phone number instead)"})).trim();
-        if (emailAnswer) {
-          email = emailAnswer;
-        } else {
-          phoneCountryCode = phoneCountryCode || (await input({message: "Phone country code, e.g. 44"})).trim();
-          phoneNumber = phoneNumber || (await input({message: "Phone number"})).trim();
-        }
+        const contact = await promptForContact(phoneCountryCode, phoneNumber);
+        email = contact.email ?? email;
+        phoneCountryCode = contact.phoneCountryCode ?? phoneCountryCode;
+        phoneNumber = contact.phoneNumber ?? phoneNumber;
       }
       if (!roleId) roleId = await pickRoleId(ctx);
     }
@@ -70,11 +75,15 @@ export default defineCommand({
       permittedStoreIds = await pickStoreIds(ctx);
     }
 
-    if (!firstName) throw new AtoaError("first name is required", "validation");
-    if (!lastName) throw new AtoaError("last name is required", "validation");
+    // A phone with no country code defaults to the UK rather than failing — the same
+    // assumption the prompt above makes, applied to the flag path.
+    if (phoneNumber && !phoneCountryCode) phoneCountryCode = DEFAULT_PHONE_COUNTRY_CODE;
+
     if (!roleId) throw new AtoaError("role is required", "validation");
     if (!hasContact())
       throw new AtoaError("provide an email, or both a phone country code and phone number", "validation");
+
+    assertStaffFields({firstName, lastName, email, phoneCountryCode, phoneNumber});
 
     const body: Record<string, unknown> = {firstName, lastName, roleId};
     if (email) body["email"] = email;
@@ -87,16 +96,61 @@ export default defineCommand({
       return;
     }
     const {data} = await ctx.http.request({...V1_ROUTES.staff.create, body});
-
-    const member = (data ?? {}) as {
-      id?: string;
-      userType?: string;
-      user?: {id?: string; firstName?: string; lastName?: string; email?: string};
-      role?: {id?: string; name?: string};
-    };
-    ctx.print({id: member.id, userType: member.userType, user: member.user, role: member.role});
+    ctx.print(projectStaff((data ?? {}) as never));
   })
 });
+
+function assertValid(result: true | string): void {
+  if (typeof result === "string") throw new AtoaError(result, "validation");
+}
+
+/** Re-checks every field so flag-supplied values face the same rules as typed ones. */
+function assertStaffFields(f: {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phoneCountryCode?: string;
+  phoneNumber?: string;
+}): void {
+  assertValid(validateStaffName("first")(f.firstName ?? ""));
+  assertValid(validateStaffName("last")(f.lastName ?? ""));
+  if (f.email) assertValid(isValidEmail(f.email) || t.emailError);
+  if (f.phoneCountryCode) assertValid(validateCountryCode(f.phoneCountryCode));
+  if (f.phoneNumber) assertValid(validatePhoneNumber(f.phoneNumber));
+}
+
+/**
+ * The backend needs an email or a full phone, not both — so this asks for an email first and
+ * only falls through to the phone pair when it's left blank.
+ */
+async function promptForContact(
+  existingCountryCode: string | undefined,
+  existingNumber: string | undefined
+): Promise<{email?: string; phoneCountryCode?: string; phoneNumber?: string}> {
+  const {input} = await import("@inquirer/prompts");
+
+  const email = (
+    await input({
+      message: `${t.labelEmailAddress} (leave blank to use a phone number instead)`,
+      validate: (v) => !v.trim() || isValidEmail(v.trim()) || t.emailError
+    })
+  ).trim();
+  if (email) return {email};
+
+  const phoneCountryCode =
+    existingCountryCode ||
+    (
+      await input({
+        message: t.labelPhoneCountryCode,
+        default: DEFAULT_PHONE_COUNTRY_CODE,
+        validate: validateCountryCode
+      })
+    ).trim();
+  const phoneNumber =
+    existingNumber || (await input({message: t.labelPhoneNumber, validate: validatePhoneNumber})).trim();
+
+  return {phoneCountryCode, phoneNumber};
+}
 
 async function pickRoleId(ctx: CommandContext): Promise<string> {
   const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)) as Array<{id?: string; name?: string}>;
@@ -113,7 +167,10 @@ async function pickRoleId(ctx: CommandContext): Promise<string> {
 }
 
 async function pickStoreIds(ctx: CommandContext): Promise<string[]> {
-  const rows = (await fetchAllPages(ctx, V1_ROUTES.stores.list)) as Array<{id?: string; locationName?: string}>;
+  const rows = (await fetchAllPages(ctx, V1_ROUTES.stores.list, {}, STORES_PAGE_SIZE)) as Array<{
+    id?: string;
+    locationName?: string;
+  }>;
   if (rows.length === 0) return [];
 
   const {checkbox} = await import("@inquirer/prompts");
@@ -123,21 +180,4 @@ async function pickStoreIds(ctx: CommandContext): Promise<string[]> {
     choices: rows.map((s) => ({name: s.locationName ?? "(unnamed store)", value: s.id ?? ""}))
   });
   return storeIds.filter(Boolean);
-}
-
-/**
- * Extracts all values for a repeated flag from raw CLI args.
- * Handles both `--store id` and `--store=id` forms.
- */
-function parseRepeatedFlag(rawArgs: string[], flag: string): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < rawArgs.length; i++) {
-    const a = rawArgs[i];
-    if (a === flag && i + 1 < rawArgs.length) {
-      out.push(rawArgs[i + 1]);
-    } else if (a.startsWith(`${flag}=`)) {
-      out.push(a.slice(flag.length + 1));
-    }
-  }
-  return out;
 }

@@ -150,19 +150,11 @@ describe("kyb link", () => {
     expect(data.url).toBe(EXPECTED_URL);
   });
 
-  it("calls openBrowser by default when --open is absent", async () => {
+  // Always opens — the command exists to get the merchant in front of the form, so there is
+  // no opt-out. The URL is still printed as a fallback when no browser can be launched.
+  it("always opens the browser at the built URL", async () => {
     await (kybLink.run as any)({args: {}, rawArgs: []});
     expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
-  });
-
-  it("--open=true calls openBrowser with the built URL", async () => {
-    await (kybLink.run as any)({args: {open: true}, rawArgs: ["--open"]});
-    expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
-  });
-
-  it("--no-open does not call openBrowser", async () => {
-    await (kybLink.run as any)({args: {open: false}, rawArgs: ["--no-open"]});
-    expect(browserMock.openBrowser).not.toHaveBeenCalled();
   });
 
   it("--dryRun does not send a request and does not open the browser", async () => {
@@ -180,26 +172,19 @@ describe("kyb card link", () => {
   // which already covers card opt-in for a merchant still going through KYB).
   const EXPECTED_URL = `${DASHBOARD}/card-signup?merchantId=biz_1`;
 
-  it("builds the card-signup dashboard URL CLI-side without any HTTP request", async () => {
+  it("builds the card-signup URL CLI-side, after one KYB pre-check", async () => {
     await (kybCardLink.run as any)({args: {}, rawArgs: []});
-    expect(mock.requests).toHaveLength(0);
+    // The URL itself is built locally; the single request is the KYB gate, which stops the
+    // CLI opening a page /card-signup would just redirect to /home.
+    expect(mock.requests).toHaveLength(1);
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/getKybStatus");
     const data = mock.getPrinted() as any;
     expect(data.url).toBe(EXPECTED_URL);
   });
 
-  it("calls openBrowser by default when --open is absent", async () => {
+  it("always opens the browser at the built URL", async () => {
     await (kybCardLink.run as any)({args: {}, rawArgs: []});
     expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
-  });
-
-  it("--open=true calls openBrowser with the built URL", async () => {
-    await (kybCardLink.run as any)({args: {open: true}, rawArgs: ["--open"]});
-    expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
-  });
-
-  it("--no-open does not call openBrowser", async () => {
-    await (kybCardLink.run as any)({args: {open: false}, rawArgs: ["--no-open"]});
-    expect(browserMock.openBrowser).not.toHaveBeenCalled();
   });
 
   it("errors when there is no active business", async () => {
@@ -214,20 +199,22 @@ describe("kyb card link", () => {
 describe("kyb card status", () => {
   it("GETs /api/business/:businessId/card-activation with jwt auth", async () => {
     await (kybCardStatus.run as any)({args: {}, rawArgs: []});
-    expect(mock.requests).toHaveLength(1);
     expect(mock.requests[0].method).toBe("GET");
     expect(mock.requests[0].path).toBe("/api/business/:businessId/card-activation");
     expect(mock.requests[0].auth).toBe("jwt");
   });
 
-  it("prints the application status", async () => {
+  // Card activation is gated on KYB, so the card status alone can't explain a merchant who
+  // can't proceed — the KYB status is fetched alongside it.
+  it("also fetches the KYB status and reports it", async () => {
     await (kybCardStatus.run as any)({args: {}, rawArgs: []});
+    expect(mock.requests.map((r) => r.path)).toContain("/api/merchant/:businessId/getKybStatus");
     const data = mock.getPrinted() as any;
-    expect(data).toEqual({status: "IN_REVIEW", paymentType: "ONLINE"});
+    expect(data).toEqual({status: "IN_REVIEW", paymentType: "ONLINE", kybStatus: "APPROVED"});
   });
 
-  // NOT_INITIATED, not NOT_APPLIED — same spelling the dashboard's CardApplicationStatus
-  // enum uses for this client-side-only state, so the two surfaces agree.
+  // NOT_INITIATED, not NOT_APPLIED — the spelling the platform already uses for this
+  // client-side-only state, so one condition is not reported under two names.
   it("treats a 404 (never applied) as a NOT_INITIATED status instead of an error", async () => {
     mock.cardActivationNotFound = true;
     await (kybCardStatus.run as any)({args: {}, rawArgs: []});

@@ -15,7 +15,7 @@ export default defineCommand({
     const existing = await fetchCustomSenderName(ctx);
     if (!existing) {
       if (isInteractive(ctx.formatExplicit)) {
-        process.stdout.write("no custom SMS sender name set — use `atoa sms-name set <name>`\n");
+        process.stdout.write("no custom SMS sender name set — use `atoa custom-sms set <name>`\n");
         return;
       }
       ctx.print(null);

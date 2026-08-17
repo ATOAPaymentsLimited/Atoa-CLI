@@ -3,7 +3,9 @@ import {FormData} from "undici";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
-import {AtoaError} from "../../lib/errors";
+import {resolveField} from "../../lib/prompt-field";
+import {STORE_FIELDS, normaliseStorePostcode} from "../../lib/validators";
+import t from "../../locales/en.json";
 
 type StoresAddArgs = CommonOptions & {
   locationName?: string;
@@ -13,10 +15,8 @@ type StoresAddArgs = CommonOptions & {
   cityOrTown?: string;
 };
 
-const required = (value: string) => (value.trim() ? true : "required");
-
 export default defineCommand({
-  meta: {name: "add", description: "Create a new merchant store"},
+  meta: {name: "add", description: "Add a new merchant store"},
   args: withCommonArgs({
     // Not `required: true` — on a TTY with a flag omitted we prompt for it instead of
     // hard-failing before that ever gets a chance (same reason as stores/update.ts's storeId).
@@ -27,39 +27,61 @@ export default defineCommand({
     cityOrTown: {type: "string", description: "city or town"}
   }),
   run: runWithContext<StoresAddArgs>(async (ctx, args) => {
-    let locationName = args.locationName?.trim();
-    let addressLine1 = args.addressLine1?.trim();
-    let addressLine2 = args.addressLine2?.trim();
-    let addressPostalCode = args.addressPostalCode?.trim();
-    let cityOrTown = args.cityOrTown?.trim();
+    const interactive = isInteractive(ctx.formatExplicit);
 
-    if (!locationName || !addressLine1 || !addressPostalCode || !cityOrTown) {
-      if (!isInteractive(ctx.formatExplicit)) {
-        if (!locationName) throw new AtoaError("--location-name is required (non-interactive)", "validation");
-        if (!addressLine1) throw new AtoaError("--address-line1 is required (non-interactive)", "validation");
-        if (!addressPostalCode)
-          throw new AtoaError("--address-postal-code is required (non-interactive)", "validation");
-        if (!cityOrTown) throw new AtoaError("--city-or-town is required (non-interactive)", "validation");
-      } else {
-        const {input} = await import("@inquirer/prompts");
-        if (!locationName) locationName = (await input({message: "Store name:", validate: required})).trim();
-        if (!addressLine1) addressLine1 = (await input({message: "Address line 1:", validate: required})).trim();
-        if (args.addressLine2 === undefined) {
-          addressLine2 = (await input({message: "Address line 2 (optional):"})).trim() || undefined;
-        }
-        if (!cityOrTown) cityOrTown = (await input({message: "City or town:", validate: required})).trim();
-        if (!addressPostalCode) {
-          addressPostalCode = (await input({message: "Postal code:", validate: required})).trim();
-        }
-      }
-    }
+    // Optional fields are only asked for as part of the wizard. A caller who supplied every
+    // required flag has said what they wanted, so don't stop them for address line 2.
+    const allRequiredGiven = Boolean(
+      args.locationName?.trim() &&
+        args.addressLine1?.trim() &&
+        args.cityOrTown?.trim() &&
+        args.addressPostalCode?.trim()
+    );
 
-    // Every branch above either throws or fills these in, but that's not something
-    // TypeScript's narrowing can see through an `||`-guarded if/else — assert here.
+    // Each field is validated against its rule, whether it
+    // arrived by flag or by prompt; an invalid flag is re-asked rather than aborting the run.
+    const locationName = await resolveField({
+      value: args.locationName,
+      flag: "location-name",
+      message: t.labelLocationName,
+      rule: STORE_FIELDS.locationName,
+      interactive
+    });
+    const addressLine1 = await resolveField({
+      value: args.addressLine1,
+      flag: "address-line1",
+      message: t.labelAddressLine1,
+      rule: STORE_FIELDS.addressLine1,
+      interactive
+    });
+    const addressLine2 = await resolveField({
+      value: args.addressLine2,
+      flag: "address-line2",
+      message: t.labelAddressLine2Optional,
+      rule: STORE_FIELDS.addressLine2,
+      interactive: interactive && !allRequiredGiven,
+      optional: true
+    });
+    const cityOrTown = await resolveField({
+      value: args.cityOrTown,
+      flag: "city-or-town",
+      message: t.labelTownCity,
+      rule: STORE_FIELDS.cityOrTown,
+      interactive
+    });
+    const addressPostalCode = await resolveField({
+      value: args.addressPostalCode,
+      flag: "address-postal-code",
+      message: t.labelPostCode,
+      rule: STORE_FIELDS.addressPostalCode,
+      interactive
+    });
+
     const fields: Record<string, string> = {
       locationName: locationName as string,
       addressLine1: addressLine1 as string,
-      addressPostalCode: addressPostalCode as string,
+      // Stripped: a stored postcode never contains a space.
+      addressPostalCode: normaliseStorePostcode(addressPostalCode as string),
       cityOrTown: cityOrTown as string
     };
     if (addressLine2) fields.addressLine2 = addressLine2;
@@ -75,29 +97,10 @@ export default defineCommand({
     const form = new FormData();
     for (const [key, value] of Object.entries(fields)) form.append(key, value);
 
-    try {
-      const {data} = await ctx.http.request({...V1_ROUTES.stores.upsert, rawBody: form});
-      const store = (data ?? {}) as {id?: string; locationName?: string};
-      ctx.print({id: store.id, locationName: store.locationName});
-    } catch (err) {
-      throw withUpgradeHint(err);
-    }
+    // A MULTI_STORE addon-limit rejection (ADDON_UPGRADE_REQUIRED) is classified and hinted
+    // centrally in lib/errors.ts, so every addon-gated command reports it identically.
+    const {data} = await ctx.http.request({...V1_ROUTES.stores.upsert, rawBody: form});
+    const store = (data ?? {}) as {id?: string; locationName?: string};
+    ctx.print({id: store.id, locationName: store.locationName});
   })
 });
-
-/**
- * MULTI_STORE addon-limit hit: the backend rejects with errorCode
- * ADDON_UPGRADE_REQUIRED. Surface a clean message with an upgrade hint instead of
- * letting the raw backend message stand alone.
- */
-function withUpgradeHint(err: unknown): unknown {
-  if (err instanceof AtoaError && err.errorCode === "ADDON_UPGRADE_REQUIRED") {
-    return new AtoaError(`${err.message} — run 'atoa addons list' to see plan/store limits`, err.kind, {
-      status: err.status,
-      errorCode: err.errorCode,
-      requestId: err.requestId,
-      additionalData: err.additionalData
-    });
-  }
-  return err;
-}

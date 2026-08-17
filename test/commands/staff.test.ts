@@ -90,14 +90,19 @@ describe("staff list", () => {
     expect(mock.requests[0].query).toMatchObject({page: "0", size: "50"});
     const data = mock.getPrinted() as any[];
     expect(Array.isArray(data)).toBe(true);
-    expect(data[0].user.firstName).toBe("Alice");
+    expect(data[0].name).toBe("Alice Smith");
   });
 
-  it("prints the staff list", async () => {
+  // Projected, not raw: the record nests name/email under `user` and wraps each permitted
+  // store in a join row, neither of which is readable in a terminal.
+  it("prints a flattened staff row, with permitted stores reduced to location names", async () => {
     await (staffList.run as any)({args: {}, rawArgs: []});
     const data = mock.getPrinted() as any[];
-    expect(Array.isArray(data)).toBe(true);
-    expect(data[0].user.firstName).toBe("Alice");
+    expect(data[0]).toMatchObject({name: "Alice Smith", role: "Admin", email: "alice@example.com"});
+    expect(data[0].user).toBeUndefined();
+    for (const store of data[0].permittedStores ?? []) {
+      expect(typeof store).toBe("string");
+    }
   });
 
   it("--dryRun does not send a request", async () => {

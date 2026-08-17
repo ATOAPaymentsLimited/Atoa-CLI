@@ -40,9 +40,10 @@ const main = defineCommand({
     signup: () => import("./commands/signup").then((m) => m.default),
     webhooks: () => import("./commands/webhooks").then((m) => m.default),
     addons: () => import("./commands/addons").then((m) => m.default),
-    "google-review": () => import("./commands/google-review").then((m) => m.default),
-    branding: () => import("./commands/branding").then((m) => m.default),
-    "sms-name": () => import("./commands/sms-name").then((m) => m.default),
+    // Group names match the product names for these features, so the same thing is called
+    // the same thing wherever a merchant meets it.
+    "custom-branding": () => import("./commands/custom-branding").then((m) => m.default),
+    "custom-sms": () => import("./commands/custom-sms").then((m) => m.default),
     "direct-debit": () => import("./commands/direct-debit").then((m) => m.default),
     comms: () => import("./commands/comms").then((m) => m.default),
 

@@ -1,5 +1,7 @@
 // Signup/registration field validators
 
+import t from "../locales/en.json";
+
 const NAME_RE = /^[a-zA-Z'\s]+$/;
 export const EMAIL_RE = /^([-+_0-9a-zA-Z]+(?:\.?[-+_0-9a-zA-Z])*)@((?:[0-9a-zA-Z][-\w]*\.)+[a-zA-Z0-9]{2,10})$/;
 
@@ -10,55 +12,158 @@ export const validateName =
   (v: string): true | string => {
     const s = (v ?? "").trim();
     if (!s) return `${label} cannot be empty`;
-    if (s.length > 100) return `${label} must be 100 characters or fewer`;
-    return NAME_RE.test(s) || "Special characters & numbers are not allowed.";
+    if (s.length > 100) return `${label} should be at most 100 characters long`;
+    return NAME_RE.test(s) || t.dontUsePunctuation;
   };
 
 export const validateBusinessName = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (!s) return "Business name cannot be empty";
-  if (s.length < 3) return "Business name should be at least 3 characters long";
-  if (s.length > 100) return "Business name must be 100 characters or fewer";
-  if (!/^[a-zA-Z0-9 ']+$/.test(s)) return "No special characters or punctuation, please!";
-  if (/^\d+$/.test(s.replace(/\s+/g, ""))) return "Business name cannot consist of numbers only.";
+  if (!s) return t.noBusinessNameError;
+  if (s.length < 3) return t.businessNameLengthError;
+  if (s.length > 100) return t.businessNameMaxError;
+  if (!/^[a-zA-Z0-9 ']+$/.test(s)) return t.noSpecialCharacters;
+  if (/^\d+$/.test(s.replace(/\s+/g, ""))) return t.businessNameNumberOnlyError;
   return true;
 };
 
 export const validateAddress = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (s.length <= 2) return "Please enter a valid address";
-  if (s.length > 120) return "Address must be 120 characters or fewer";
-  // Dashboard allowlist (v-regex-paste): letters, digits, space and , ' & : -
-  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || "Address can only contain letters, numbers, spaces and , ' & : -";
+  if (s.length <= 2) return t.addressError;
+  if (s.length > 120) return t.addressMaxError;
+  // Allowed: letters, digits, space and , ' & : -
+  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || t.addressCharactersError;
 };
 
-// Address line 2 is optional and, on the dashboard, carries no validation rules at all —
-// only the same character filter as line 1. Empty passes.
+// Address line 2 is optional and carries no rules beyond the character filter line 1 uses.
+// Empty passes.
 export const validateAddressLine2 = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  if (s.length > 120) return "Address must be 120 characters or fewer";
-  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || "Address can only contain letters, numbers, spaces and , ' & : -";
+  if (s.length > 120) return t.addressMaxError;
+  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || t.addressCharactersError;
 };
 
 export const validatePostcode = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (s.length <= 2) return "Please enter a valid postal code";
-  if (s.length > (s.includes(" ") ? 8 : 7)) return "Please enter a valid postal code";
-  return /^[a-zA-Z0-9 ]+$/.test(s) || "Please enter a valid postal code";
+  if (s.length <= 2) return t.postalCodeError;
+  if (s.length > (s.includes(" ") ? 8 : 7)) return t.postalCodeError;
+  return /^[a-zA-Z0-9 ]+$/.test(s) || t.postalCodeError;
 };
 
-// VAT is required at signup, matching the dashboard (createVatValidationRule with
-// isOptional defaulted false). Same pattern it uses: optional GB prefix + 9 digits.
+/*
+ * Store (location) fields.
+ *
+ * Deliberately NOT the address rules above: a store address allows only letters, digits and
+ * spaces (no `, ' & : -`), requires a minimum of 3 rather than "more than 2", and caps line 1
+ * at 255 rather than 120. Sharing one address validator would loosen stores and tighten
+ * registration at the same time.
+ *
+ * The character rule is reported before the length rules — a length complaint about a value
+ * that is the right length but has the wrong characters names the wrong problem.
+ */
+const STORE_TEXT_RE = /^[a-zA-Z0-9\s]+$/;
+
+const storeText =
+  (msg: {empty: string; tooShort: string; tooLong: string}, max: number, optional = false) =>
+  (v: string): true | string => {
+    const s = (v ?? "").trim();
+    if (!s) return optional ? true : msg.empty;
+    if (!STORE_TEXT_RE.test(s)) return t.noSpecialCharacters;
+    if (s.length < 3) return msg.tooShort;
+    return s.length <= max || msg.tooLong;
+  };
+
+export const validateStoreName = (v: string): true | string => {
+  const base = storeText(
+    {empty: t.locationNameEmptyErrMsg, tooShort: t.locationNameLengthErrMsg, tooLong: t.locationNameMaxErrMsg},
+    30
+  )(v);
+  if (base !== true) return base;
+  // The business's own store is named "Default"; reusing the name collides with it.
+  return (v ?? "").trim().toLowerCase() !== "default" || t.defaultLocationNameErrMsg;
+};
+
+export const validateStoreAddressLine1 = storeText(
+  {empty: t.addressLine1EmptyErrMsg, tooShort: t.addressLine1LengthErrMsg, tooLong: t.addressLine1MaxErrMsg},
+  255
+);
+
+export const validateStoreCity = storeText(
+  {empty: t.townCityEmptyErrMsg, tooShort: t.townCityLengthErrMsg, tooLong: t.townCityMaxErrMsg},
+  120
+);
+
+export const validateStoreAddressLine2 = storeText(
+  {empty: "", tooShort: t.addressLine2LengthErrMsg, tooLong: t.addressLine2MaxErrMsg},
+  120,
+  true
+);
+
+/**
+ * Store postcode: 3–7 letters/digits. A typed space is tolerated and stripped by
+ * normaliseStorePostcode before the value is sent, so the stored postcode never contains one.
+ */
+export const validateStorePostcode = (v: string): true | string => {
+  const s = normaliseStorePostcode(v);
+  if (!s) return t.postCodeEmptyErrMsg;
+  if (!/^[a-zA-Z0-9]+$/.test(s)) return t.noSpecialCharacters;
+  if (s.length < 3) return t.postCodeLengthErrorMsg;
+  return s.length <= 7 || t.postCodeMaxErrorMsg;
+};
+
+export const normaliseStorePostcode = (v: string): string => (v ?? "").replace(/\s+/g, "");
+
+/**
+ * Custom SMS sender name: 3–11 characters, letters, digits and spaces only. The 11 is the
+ * alphanumeric sender-ID limit carriers enforce, not a presentation choice, so it is not
+ * somewhere to be generous.
+ */
+export const validateSmsSenderName = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!/^[A-Za-z0-9\s]*$/.test(s)) return t.noSpecialCharacters;
+  if (s.length < 3) return t.brandNameTooShort;
+  return s.length <= 11 || t.brandNameTooLong;
+};
+
+export const validateRoleName = (v: string): true | string => {
+  const s = (v ?? "").trim();
+  if (!s) return t.roleNameIsRequired;
+  if (s.length < 3) return t.roleNameLengthError;
+  return s.length <= 100 || t.roleNameMaxError;
+};
+
+/**
+ * Staff first/last name: letters, apostrophes and spaces, up to 100 characters. Every failure
+ * reports the same message — the field is short enough that naming which rule failed adds
+ * noise rather than help.
+ */
+export const validateStaffName =
+  (which: "first" | "last") =>
+  (v: string): true | string => {
+    const s = (v ?? "").trim();
+    const ok = Boolean(s) && s.length <= 100 && NAME_RE.test(s);
+    return ok || (which === "first" ? t.firstNameError : t.lastNameError);
+  };
+
+/** Store field name → rule, so `stores add` and `stores update` cannot drift apart. */
+export const STORE_FIELDS = {
+  locationName: validateStoreName,
+  addressLine1: validateStoreAddressLine1,
+  addressLine2: validateStoreAddressLine2,
+  cityOrTown: validateStoreCity,
+  addressPostalCode: validateStorePostcode
+} as const;
+
+// VAT is required at signup: an optional GB prefix followed by 9 digits.
 export const VAT_RE = /^(GB)?\d{9}$/i;
 
 export const validateVatNumber = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (!s) return "VAT number is required";
+  if (!s) return t.vatRequiredError;
   // Validate the normalised form so "GB 123 456 789" and "gb123456789" are accepted —
   // the postcode prompt already normalises this way, and VAT is printed with spaces
   // on most invoices.
-  return VAT_RE.test(normaliseVatNumber(s)) || "VAT number must contain 9 digits (e.g. 123456789 or GB123456789)";
+  return VAT_RE.test(normaliseVatNumber(s)) || t.vatError;
 };
 
 /**
@@ -88,7 +193,7 @@ const isValidWebsite = (raw: string): boolean => {
 export const validateWebsiteUrl = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  return isValidWebsite(s) || "Please enter a valid website URL (e.g. https://acme.co.uk)";
+  return isValidWebsite(s) || t.websiteUrlValidationErrorMsg;
 };
 
 /** VAT accepts an optional GB prefix and tolerates spacing/case; normalise before sending. */
@@ -98,13 +203,13 @@ export const normaliseVatNumber = (v: string): string => (v ?? "").replace(/\s+/
 export const validateCountryCode = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  return /^\d{1,4}$/.test(s) || "Please enter a valid country code (numbers only, e.g. 44).";
+  return /^\d{1,4}$/.test(s) || t.invalidCountryCode;
 };
 
 export const validatePhoneNumber = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  if (!/^\d+$/.test(s)) return "Please enter a valid phone number (numbers only).";
-  if (s.length > 11) return "Please enter a valid phone number.";
-  return s.replace(/^0+/, "").length >= 10 || "Please enter a valid phone number.";
+  if (!/^\d+$/.test(s)) return t.phoneNumberError;
+  if (s.length > 11) return t.phoneNumberError;
+  return s.replace(/^0+/, "").length >= 10 || t.phoneNumberError;
 };

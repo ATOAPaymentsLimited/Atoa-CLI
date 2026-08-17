@@ -11,10 +11,9 @@ export default defineCommand({
       return;
     }
     const {data} = await ctx.http.request({...V1_ROUTES.options.get});
-    const options = (data ?? {}) as {theme?: {colorCode?: string; foregroundColor?: string}};
-    ctx.print({
-      colorCode: options.theme?.colorCode || undefined,
-      foregroundColor: options.theme?.foregroundColor || undefined
-    });
+    const options = (data ?? {}) as {theme?: {colorCode?: string}};
+    // The colour code is the only part of the theme a merchant sets or reads; an unset one
+    // renders as N/A rather than an empty cell.
+    ctx.print({colorCode: options.theme?.colorCode || undefined});
   })
 });

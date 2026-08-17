@@ -9,12 +9,12 @@ import type {CommandContext} from "../../lib/context";
 type StaffRemoveArgs = CommonOptions & {userId?: string};
 
 export default defineCommand({
-  meta: {name: "remove", description: "Remove a staff member's access to this business"},
+  meta: {name: "delete", description: "Delete a staff member's access to this business"},
   args: withCommonArgs({
     userId: {
       type: "positional",
       required: false,
-      description: "business-user ID (omit to pick from the staff list on a TTY)"
+      description: "user ID of the staff member (omit to pick from the staff list on a TTY)"
     }
   }),
   run: runWithContext<StaffRemoveArgs>(async (ctx, args) => {
@@ -49,10 +49,17 @@ export default defineCommand({
   })
 });
 
+/**
+ * Picks a staff member, returning their **user** id.
+ *
+ * A staff row carries two ids: `id` is the business-user link, `user.id` is the person. The
+ * delete route keys on the person — it refuses when the caller's own id matches — so sending
+ * the link id targets nothing and the self-deletion guard can never fire.
+ */
 async function pickStaffMember(ctx: CommandContext): Promise<{id: string; display: string}> {
   const rows = (await fetchAllPages(ctx, V1_ROUTES.staff.list)) as Array<{
     id?: string;
-    user?: {firstName?: string; lastName?: string; email?: string};
+    user?: {id?: string; firstName?: string; lastName?: string; email?: string};
   }>;
   if (rows.length === 0) throw new AtoaError("no staff found for this business", "not_found");
 
@@ -62,8 +69,8 @@ async function pickStaffMember(ctx: CommandContext): Promise<{id: string; displa
     pageSize: 12,
     choices: rows.map((s) => {
       const fullName = [s.user?.firstName, s.user?.lastName].filter(Boolean).join(" ");
-      const display = fullName || s.user?.email || s.id || "(unknown)";
-      return {name: display, value: {id: s.id ?? "", display}};
+      const display = fullName || s.user?.email || s.user?.id || "(unknown)";
+      return {name: display, value: {id: s.user?.id ?? "", display}};
     })
   });
   if (!picked.id) throw new AtoaError("no staff member selected", "validation");

@@ -76,9 +76,9 @@ vi.mock("../../src/lib/context", async () => {
   return {...actual, buildContext: mock.buildContext};
 });
 
-import smsNameSet from "../../src/commands/sms-name/set";
-import smsNameRemove from "../../src/commands/sms-name/remove";
-import smsNameList from "../../src/commands/sms-name/list";
+import smsNameSet from "../../src/commands/custom-sms/set";
+import smsNameRemove from "../../src/commands/custom-sms/delete";
+import smsNameList from "../../src/commands/custom-sms/list";
 
 beforeEach(() => {
   mock.reset();
@@ -86,7 +86,7 @@ beforeEach(() => {
   process.exitCode = 0;
 });
 
-describe("sms-name set", () => {
+describe("custom-sms set", () => {
   it("first-ever create: runs the options pre-step, then POST, in order (2 requests)", async () => {
     await (smsNameSet.run as any)({args: {name: "Acme Cafe"}, rawArgs: []});
     // GET (check existing) → PUT options (pre-step) → POST create = 3 requests total.
@@ -113,7 +113,7 @@ describe("sms-name set", () => {
   });
 });
 
-describe("sms-name remove", () => {
+describe("custom-sms delete", () => {
   it("DELETEs using the existing record's id", async () => {
     mock.existing = {id: "csn_1", customSmsName: "Acme", status: "APPROVED"};
     await (smsNameRemove.run as any)({args: {}, rawArgs: []});
@@ -130,7 +130,7 @@ describe("sms-name remove", () => {
   });
 });
 
-describe("sms-name list", () => {
+describe("custom-sms list", () => {
   it("prints null when nothing is set (scripting output)", async () => {
     await (smsNameList.run as any)({args: {}, rawArgs: []});
     expect(mock.getPrinted()).toBeNull();

@@ -18,7 +18,9 @@ export default defineCommand({
     }
 
     if (!ctx.yes) {
-      const ok = await confirm({message: `DELETE ${path}? This cannot be undone.`});
+      // Defaults to no: this sends a raw DELETE to any path, and the prompt itself says it
+      // cannot be undone — an accidental Enter should not be the thing that confirms it.
+      const ok = await confirm({message: `DELETE ${path}? This cannot be undone.`, default: false});
       if (!ok) {
         process.stdout.write("Aborted.\n");
         return;

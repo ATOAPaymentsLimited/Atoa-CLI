@@ -1,4 +1,4 @@
-import {describe, it, expect, vi, beforeEach} from "vitest";
+﻿import {describe, it, expect, vi, beforeEach} from "vitest";
 
 const mock = vi.hoisted(() => {
   const requests: Array<{method: string; path: string; auth?: string; body?: any}> = [];
@@ -46,9 +46,9 @@ vi.mock("../../src/lib/context", async () => {
   return {...actual, buildContext: mock.buildContext};
 });
 
-import brandingGet from "../../src/commands/branding/get";
-import brandingSet from "../../src/commands/branding/set";
-import brandingReset from "../../src/commands/branding/reset";
+import brandingGet from "../../src/commands/custom-branding/get";
+import brandingSet from "../../src/commands/custom-branding/set";
+import brandingReset from "../../src/commands/custom-branding/reset";
 
 beforeEach(() => {
   mock.reset();

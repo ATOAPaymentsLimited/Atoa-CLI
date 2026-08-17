@@ -6,6 +6,7 @@ export default defineCommand({
     list: () => import("./list").then((m) => m.default),
     invite: () => import("./invite").then((m) => m.default),
     add: () => import("./add").then((m) => m.default),
-    remove: () => import("./remove").then((m) => m.default)
+    update: () => import("./update").then((m) => m.default),
+    delete: () => import("./delete").then((m) => m.default)
   }
 });

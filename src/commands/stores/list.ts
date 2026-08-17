@@ -1,7 +1,7 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAllPages, presentList} from "../../lib/list-view";
+import {fetchAllPages, presentList, STORES_PAGE_SIZE} from "../../lib/list-view";
 
 export default defineCommand({
   meta: {name: "list", description: "List merchant stores"},
@@ -13,7 +13,7 @@ export default defineCommand({
     }
 
     // fetchAllPages unwraps the paginated envelope and pages through it.
-    const rows = await fetchAllPages(ctx, V1_ROUTES.stores.list);
+    const rows = await fetchAllPages(ctx, V1_ROUTES.stores.list, {}, STORES_PAGE_SIZE);
     await presentList(ctx, rows, {
       title: "Stores",
       line: (s) =>
