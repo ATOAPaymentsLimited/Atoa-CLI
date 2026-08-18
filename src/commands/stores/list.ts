@@ -1,7 +1,8 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAllPages, presentList, STORES_PAGE_SIZE} from "../../lib/list-view";
+import {fetchAllPages, presentList} from "../../lib/list-view";
+import {STORES_PAGE_SIZE} from "../../lib/constants";
 
 export default defineCommand({
   meta: {name: "list", description: "List merchant stores"},

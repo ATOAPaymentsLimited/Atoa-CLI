@@ -1,7 +1,8 @@
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isValidEmail, validateAddress, validateAddressLine2, validatePostcode} from "../../lib/validators";
 import {AtoaError} from "../../lib/errors";
-import t from "../../locales/en.json";
+import {MandateStatus} from "../../lib/enums";
+import {t} from "../../lib/i18n";
 import type {CommandContext} from "../../lib/context";
 
 /**
@@ -20,21 +21,21 @@ const digitsOfLength =
   };
 
 export const RULES: Record<string, (value: string) => true | string> = {
-  accountNumber: digitsOfLength(8, t.bankAccountNumberDigitsError, t.bankAccountNumberLengthError),
-  sortCode: digitsOfLength(6, t.sortCodeDigitsErrorMsg, t.sortCodeLengthErrorMsg),
+  accountNumber: digitsOfLength(8, t("bankAccountNumberDigitsError"), t("bankAccountNumberLengthError")),
+  sortCode: digitsOfLength(6, t("sortCodeDigitsErrorMsg"), t("sortCodeLengthErrorMsg")),
   name: (v) => {
     const s = v.trim();
-    if (!s) return t.accountHolderNameRequiredErrorMsg;
+    if (!s) return t("accountHolderNameRequiredErrorMsg");
     // 20, not the 100 allowed elsewhere — this is what the mandate's name field accepts.
-    return s.length <= 20 || t.accountHolderNameMaxErrorMsg;
+    return s.length <= 20 || t("accountHolderNameMaxErrorMsg");
   },
-  email: (v) => isValidEmail(v.trim()) || t.emailError,
+  email: (v) => isValidEmail(v.trim()) || t("emailError"),
   // Address, line 2 and postcode reuse the shared address validators. Postcode is the more
   // permissive of the two rules on purpose: "SW1 1AA" is accepted here and the space stripped
   // before the value is sent.
   addressLine1: validateAddress,
   addressLine2: validateAddressLine2,
-  city: (v) => (validateAddress(v) === true ? true : t.cityOrTownError),
+  city: (v) => (validateAddress(v) === true ? true : t("cityOrTownError")),
   postalCode: validatePostcode
 };
 
@@ -96,8 +97,16 @@ export async function fetchPrefillSources(ctx: CommandContext): Promise<PrefillS
 }
 
 export interface AssignedPlan {
-  isDirectDebitSetup?: boolean;
   stripeCustomer?: {mandateDetails?: {status?: string}};
+}
+
+/**
+ * Whether a usable mandate exists. Derived from the mandate's own status — the response carries
+ * no `isDirectDebitSetup` field, so reading one silently yields undefined and reports "not set
+ * up" for a merchant who has an active mandate.
+ */
+export function hasActiveMandate(plan: AssignedPlan | undefined): boolean {
+  return plan?.stripeCustomer?.mandateDetails?.status === MandateStatus.ACTIVE;
 }
 
 /**
@@ -143,7 +152,7 @@ export function describeAccount(a: BankAccount): string {
       a.enabled === false ? "(disabled)" : null
     ]
       .filter(Boolean)
-      .join("  ·  ") || "(unnamed account)"
+      .join("  ·  ") || t("unnamedAccount")
   );
 }
 

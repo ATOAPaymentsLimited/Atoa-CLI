@@ -1,4 +1,5 @@
 import {AtoaError} from "./errors";
+import {t} from "./i18n";
 
 export type FieldRule = (value: string) => true | string;
 
@@ -17,11 +18,8 @@ export interface ResolveFieldOptions {
 }
 
 /**
- * Resolves one input field against a validation rule.
- *
- * A valid flag value is taken as-is. An invalid one is reported and then re-asked on a TTY —
- * @inquirer's `validate` keeps the prompt open, printing the reason under it, until the answer
- * passes. With nobody to ask (piped, or an explicit --output), it fails instead of hanging.
+ * Resolves one field from a flag or a prompt, validating both the same way. An invalid flag is
+ * re-asked on a TTY rather than aborting; with nobody to ask it fails instead of hanging.
  */
 export async function resolveField(opts: ResolveFieldOptions): Promise<string | undefined> {
   const supplied = opts.value?.trim();
@@ -29,11 +27,12 @@ export async function resolveField(opts: ResolveFieldOptions): Promise<string | 
   if (supplied) {
     const verdict = opts.rule(supplied);
     if (verdict === true) return supplied;
-    if (!opts.interactive) throw new AtoaError(`--${opts.flag}: ${verdict}`, "validation");
-    process.stderr.write(`--${opts.flag}: ${verdict}\n`);
+    const message = t("flagInvalid", {flag: opts.flag, reason: verdict});
+    if (!opts.interactive) throw new AtoaError(message, "validation");
+    process.stderr.write(`${message}\n`);
   } else if (!opts.interactive) {
     if (opts.optional) return undefined;
-    throw new AtoaError(`--${opts.flag} is required`, "validation");
+    throw new AtoaError(t("flagRequired", {flag: opts.flag}), "validation");
   }
 
   const {input} = await import("@inquirer/prompts");

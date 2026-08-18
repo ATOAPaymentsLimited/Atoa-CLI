@@ -4,6 +4,7 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
 import {fetchCurrentPlan} from "./_shared";
+import {t} from "../../lib/i18n";
 
 export default defineCommand({
   meta: {name: "cancel-downgrade", description: "Cancel a scheduled downgrade and stay on the current plan"},
@@ -16,10 +17,10 @@ export default defineCommand({
 
     if (!ctx.yes) {
       if (!isInteractive(ctx.formatExplicit)) {
-        throw new AtoaError("pass --yes to cancel the scheduled downgrade non-interactively", "validation");
+        throw new AtoaError(t("passYesToCancelDowngrade"), "validation");
       }
       const {confirm} = await import("@inquirer/prompts");
-      const ok = await confirm({message: "Cancel the scheduled downgrade?", default: false});
+      const ok = await confirm({message: t("cancelDowngradePrompt"), default: false});
       if (!ok) {
         process.stdout.write("Aborted.\n");
         return;
@@ -32,7 +33,7 @@ export default defineCommand({
     // outcome and the plan that is now being stayed on.
     const current = await fetchCurrentPlan(ctx).catch(() => undefined);
     ctx.print({
-      status: "Scheduled downgrade cancelled",
+      status: t("downgradeCancelled"),
       stayingOn: current?.addonPlan?.name,
       monthlyAmount: current?.addonPlan?.monthlyAmount
     });

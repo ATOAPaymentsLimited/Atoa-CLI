@@ -4,7 +4,7 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {resolveField} from "../../lib/prompt-field";
 import {validateRoleName} from "../../lib/validators";
-import t from "../../locales/en.json";
+import {t} from "../../lib/i18n";
 import {fetchAllPages} from "../../lib/list-view";
 import {pickPermissionIds, resolvePermissionIds, withUpgradeHint, parseRepeatedFlag, projectRole} from "./_shared";
 import type {CommandContext} from "../../lib/context";
@@ -35,19 +35,19 @@ export default defineCommand({
     const rule = (v: string): true | string => {
       const verdict = validateRoleName(v);
       if (verdict !== true) return verdict;
-      return !taken.has(v.trim().toLowerCase()) || t.roleNameAlreadyExists;
+      return !taken.has(v.trim().toLowerCase()) || t("roleNameAlreadyExists");
     };
 
     name = await resolveField({
       value: name,
       flag: "name",
-      message: t.labelRoleName,
+      message: t("labelRoleName"),
       rule,
       interactive
     });
     if (!description && interactive) {
       const {input} = await import("@inquirer/prompts");
-      description = (await input({message: t.labelRoleDescription})).trim() || undefined;
+      description = (await input({message: t("labelRoleDescription")})).trim() || undefined;
     }
 
     if (interactive && permissionIds.length === 0) {

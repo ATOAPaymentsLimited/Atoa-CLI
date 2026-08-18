@@ -3,7 +3,7 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
-import {resolveField} from "../../lib/prompt-field";
+import {resolveField, type FieldRule} from "../../lib/prompt-field";
 import {
   RULES,
   fetchPrefillSources,
@@ -11,29 +11,41 @@ import {
   describeAccount,
   maskAccountNumber,
   fetchAssignedPlan,
+  hasActiveMandate,
   type DirectDebitPrefill,
   type BankAccount
 } from "./_shared";
-import t from "../../locales/en.json";
+import {t} from "../../lib/i18n";
 import type {CommandContext} from "../../lib/context";
 
 type Field = "accountNumber" | "sortCode" | "name" | "email" | "addressLine1" | "addressLine2" | "city" | "postalCode";
 
+/** Collected by a bespoke masked prompt rather than the shared loop below. */
+const ACCOUNT_NUMBER: Field = "accountNumber";
+
 type DirectDebitSetupArgs = CommonOptions & Partial<Record<Field, string>>;
 
-/** Field order matches the Direct Debit form so the two flows ask for things in the same sequence. */
-const PROMPTS: Array<[Field, string]> = [
-  ["accountNumber", t.labelAccountNumber],
-  ["sortCode", t.labelSortCode],
-  ["name", t.labelNameOnAccount],
-  ["email", t.labelEmailAddress],
-  ["addressLine1", t.labelAddressLine1],
-  ["addressLine2", t.labelAddressLine2Optional],
-  ["city", t.labelTownCity],
-  ["postalCode", t.labelPostalCode]
-];
+/**
+ * Prompt order, label, rule and optionality in one table. Split across separate lists, omitting
+ * a field from the required one would silently make it optional; here the type forces all four.
+ */
+interface FieldSpec {
+  key: Field;
+  label: string;
+  rule: FieldRule;
+  optional?: boolean;
+}
 
-const REQUIRED: Field[] = ["accountNumber", "sortCode", "name", "email", "addressLine1", "city", "postalCode"];
+const FIELDS: FieldSpec[] = [
+  {key: "accountNumber", label: t("labelAccountNumber"), rule: RULES.accountNumber},
+  {key: "sortCode", label: t("labelSortCode"), rule: RULES.sortCode},
+  {key: "name", label: t("labelNameOnAccount"), rule: RULES.name},
+  {key: "email", label: t("labelEmailAddress"), rule: RULES.email},
+  {key: "addressLine1", label: t("labelAddressLine1"), rule: RULES.addressLine1},
+  {key: "addressLine2", label: t("labelAddressLine2Optional"), rule: RULES.addressLine2, optional: true},
+  {key: "city", label: t("labelTownCity"), rule: RULES.city},
+  {key: "postalCode", label: t("labelPostalCode"), rule: RULES.postalCode}
+];
 
 export default defineCommand({
   meta: {
@@ -78,12 +90,8 @@ export default defineCommand({
 });
 
 /**
- * Chooses which bank account the form is pre-filled from.
- *
- * With more than one on file the merchant picks, and the account number, sort code and bank
- * code all follow that choice — picking a different account re-fills those three, it does not
- * leave the first account's details behind. With none on file the bank is chosen from the
- * institution list instead, which fixes the bank code while the account details are typed.
+ * Picks the account to pre-fill from; account number, sort code and bank code all follow that
+ * choice. With none on file the bank comes from the institution list, setting the bank code only.
  */
 async function resolvePrefill(ctx: CommandContext): Promise<DirectDebitPrefill> {
   const sources = await fetchPrefillSources(ctx);
@@ -97,7 +105,7 @@ async function resolvePrefill(ctx: CommandContext): Promise<DirectDebitPrefill> 
 
   const {select} = await import("@inquirer/prompts");
   const chosen = await select<BankAccount>({
-    message: "Bank account",
+    message: t("labelBankAccount"),
     pageSize: 12,
     choices: sources.accounts.map((a) => ({name: describeAccount(a), value: a}))
   });
@@ -119,14 +127,14 @@ async function pickInstitutionCode(ctx: CommandContext): Promise<string | undefi
 
     const {select} = await import("@inquirer/prompts");
     return await select<string | undefined>({
-      message: "Bank",
+      message: t("labelBank"),
       pageSize: 12,
       choices: [
         ...usable.map((b) => ({
           name: [b.fullName || b.name, b.businessBank ? "Business" : "Personal"].filter(Boolean).join("  ·  "),
           value: b.bankCode
         })),
-        {name: "— Skip —", value: undefined}
+        {name: t("optionSkip"), value: undefined}
       ]
     });
   } catch {
@@ -144,15 +152,16 @@ async function collectFields(
     accountNumber: await collectAccountNumber(args.accountNumber?.trim(), prefill, interactive)
   };
 
-  for (const [key, label] of PROMPTS) {
-    if (key === "accountNumber") continue;
+  for (const {key, label, rule, optional} of FIELDS) {
+    // Collected above, by its own masked prompt.
+    if (key === ACCOUNT_NUMBER) continue;
     fields[key] = await resolveField({
       value: args[key],
       flag: toFlag(key),
       message: label,
-      rule: RULES[key],
+      rule,
       interactive,
-      optional: !REQUIRED.includes(key),
+      optional,
       default: prefill[key]
     });
   }
@@ -173,7 +182,7 @@ async function collectAccountNumber(
     const {input} = await import("@inquirer/prompts");
     const answer = (
       await input({
-        message: `Account number (${masked} on file — press Enter to keep)`,
+        message: `${t("labelAccountNumber")} (${masked} ${t("onFilePressEnterToKeep")})`,
         validate: (v) => (v.trim() ? RULES.accountNumber(v) : true)
       })
     ).trim();
@@ -185,7 +194,7 @@ async function collectAccountNumber(
   const value = await resolveField({
     value: supplied,
     flag: "account-number",
-    message: "Account number",
+    message: t("labelAccountNumber"),
     rule: RULES.accountNumber,
     interactive
   });
@@ -199,11 +208,11 @@ async function confirmAccountNumber(accountNumber: string): Promise<void> {
   const {input} = await import("@inquirer/prompts");
   const again = (
     await input({
-      message: "Confirm account number",
-      validate: (v) => v.trim() === accountNumber || "account numbers do not match"
+      message: t("confirmAccountNumberPrompt"),
+      validate: (v) => v.trim() === accountNumber || t("accountNumbersDoNotMatch")
     })
   ).trim();
-  if (again !== accountNumber) throw new AtoaError("account numbers do not match", "validation");
+  if (again !== accountNumber) throw new AtoaError(t("accountNumbersDoNotMatch"), "validation");
 }
 
 /**
@@ -212,15 +221,10 @@ async function confirmAccountNumber(accountNumber: string): Promise<void> {
  */
 async function assertNoActiveMandate(ctx: CommandContext): Promise<void> {
   const plan = await fetchAssignedPlan(ctx);
-  if (!plan?.isDirectDebitSetup) return;
+  if (!hasActiveMandate(plan)) return;
 
-  const status = plan.stripeCustomer?.mandateDetails?.status;
-  throw new AtoaError(
-    `A Direct Debit mandate is already set up for this business${status ? ` (status: ${status})` : ""}. ` +
-      "It cannot be set up again — run `atoa direct-debit status` to review it, or contact Atoa support to change " +
-      "the account it debits.",
-    "validation"
-  );
+  const status = plan?.stripeCustomer?.mandateDetails?.status;
+  throw new AtoaError(t("mandateAlreadySetUp", {status: status ? ` (status: ${status})` : ""}), "validation");
 }
 
 /**
@@ -230,14 +234,13 @@ async function assertNoActiveMandate(ctx: CommandContext): Promise<void> {
 async function assertMandateAccepted(interactive: boolean): Promise<void> {
   if (!interactive) return;
   const {confirm} = await import("@inquirer/prompts");
-  const accepted = await confirm({message: t.mandateAcceptTerms, default: true});
-  if (!accepted) throw new AtoaError("the direct-debit mandate was not accepted", "validation");
+  const accepted = await confirm({message: t("mandateAcceptTerms"), default: true});
+  if (!accepted) throw new AtoaError(t("mandateNotAccepted"), "validation");
 }
 
 /**
- * Wire shape for the Direct Debit request — including the fixed GB/UK address pair, which is
- * never collected, and the millisecond `accepted_at` every caller of this endpoint sends.
- * `user_agent` records the channel the mandate was actually accepted through.
+ * GB/UK are fixed rather than collected, and `accepted_at` is milliseconds, as every other
+ * caller of this endpoint sends.
  */
 function buildBody(fields: Partial<Record<Field, string>>, bankCode: string | undefined) {
   const body: Record<string, unknown> = {

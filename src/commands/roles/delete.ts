@@ -4,6 +4,7 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages} from "../../lib/list-view";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
+import {t} from "../../lib/i18n";
 
 type RolesDeleteArgs = CommonOptions & {roleId?: string};
 
@@ -56,7 +57,7 @@ async function pickRole(rows: RoleRow[]): Promise<{id: string; name: string}> {
   const picked = await select<{id: string; name: string}>({
     message: "Select a role to delete",
     pageSize: 12,
-    choices: rows.map((r) => ({name: r.name ?? "(unnamed role)", value: {id: r.id ?? "", name: r.name ?? r.id ?? ""}}))
+    choices: rows.map((r) => ({name: r.name ?? t("unnamedRole"), value: {id: r.id ?? "", name: r.name ?? r.id ?? ""}}))
   });
   if (!picked.id) throw new AtoaError("no role selected", "validation");
   return picked;

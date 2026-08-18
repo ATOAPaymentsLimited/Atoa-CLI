@@ -1,13 +1,13 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAllPages, STORES_PAGE_SIZE} from "../../lib/list-view";
+import {fetchAllPages} from "../../lib/list-view";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
 import {resolveField} from "../../lib/prompt-field";
 import {validateStaffName, isValidEmail, validateCountryCode, validatePhoneNumber} from "../../lib/validators";
-import {DEFAULT_PHONE_COUNTRY_CODE} from "../../lib/constants";
-import t from "../../locales/en.json";
+import {DEFAULT_PHONE_COUNTRY_CODE, STORES_PAGE_SIZE} from "../../lib/constants";
+import {t} from "../../lib/i18n";
 import {projectStaff, parseRepeatedFlag} from "./_shared";
 import type {CommandContext} from "../../lib/context";
 
@@ -87,7 +87,7 @@ export default defineCommand({
 
     let userId = args.userId?.trim();
     if (!userId) {
-      if (!interactive) throw new AtoaError("userId is required (non-interactive)", "validation");
+      if (!interactive) throw new AtoaError(t("argRequiredNonInteractive", {arg: "userId"}), "validation");
       userId = await pickStaffUserId(rows);
     }
 
@@ -115,7 +115,7 @@ export default defineCommand({
 
     // The backend rejects an update that would leave a staff member with no way to be reached.
     if (!email && !(phoneCountryCode && phoneNumber)) {
-      throw new AtoaError("provide an email, or both a phone country code and phone number", "validation");
+      throw new AtoaError(t("contactRequired"), "validation");
     }
 
     const roleId = args.role?.trim() || (interactive ? await pickRoleId(ctx, current.roleId) : current.roleId);
@@ -130,7 +130,7 @@ export default defineCommand({
 
     const next = {firstName, lastName, email, phoneCountryCode, phoneNumber, roleId, storeIds};
     if (!hasChanges(next, current)) {
-      ctx.print({status: "No changes", staff: [firstName, lastName].filter(Boolean).join(" ")});
+      ctx.print({status: t("noChanges"), staff: [firstName, lastName].filter(Boolean).join(" ")});
       return;
     }
 
@@ -182,7 +182,7 @@ async function collectFields(
     firstName: await resolveField({
       value: keep(args.firstName, current.firstName),
       flag: "first-name",
-      message: t.labelFirstName,
+      message: t("labelFirstName"),
       rule: validateStaffName("first"),
       interactive,
       default: current.firstName
@@ -190,7 +190,7 @@ async function collectFields(
     lastName: await resolveField({
       value: keep(args.lastName, current.lastName),
       flag: "last-name",
-      message: t.labelLastName,
+      message: t("labelLastName"),
       rule: validateStaffName("last"),
       interactive,
       default: current.lastName
@@ -198,8 +198,8 @@ async function collectFields(
     email: await resolveField({
       value: keep(args.email, current.email),
       flag: "email",
-      message: t.labelEmailAddress,
-      rule: (v) => !v.trim() || isValidEmail(v.trim()) || t.emailError,
+      message: t("labelEmailAddress"),
+      rule: (v) => !v.trim() || isValidEmail(v.trim()) || t("emailError"),
       interactive,
       optional: true,
       default: current.email
@@ -207,7 +207,7 @@ async function collectFields(
     phoneNumber: await resolveField({
       value: keep(args.phone, current.phoneNumber),
       flag: "phone",
-      message: t.labelPhoneNumber,
+      message: t("labelPhoneNumber"),
       rule: validatePhoneNumber,
       interactive,
       optional: true,
@@ -217,11 +217,11 @@ async function collectFields(
 }
 
 async function pickStaffUserId(rows: StaffRow[]): Promise<string> {
-  if (rows.length === 0) throw new AtoaError("no staff found for this business", "not_found");
+  if (rows.length === 0) throw new AtoaError(t("noStaffFound"), "not_found");
 
   const {select} = await import("@inquirer/prompts");
   const userId = await select<string>({
-    message: "Select a staff member to update",
+    message: t("selectStaffToUpdate"),
     pageSize: 12,
     choices: rows.map((s) => {
       const name = [s.user?.firstName, s.user?.lastName].filter(Boolean).join(" ");
@@ -231,7 +231,7 @@ async function pickStaffUserId(rows: StaffRow[]): Promise<string> {
       };
     })
   });
-  if (!userId) throw new AtoaError("no staff member selected", "validation");
+  if (!userId) throw new AtoaError(t("noStaffSelected"), "validation");
   return userId;
 }
 
@@ -241,10 +241,10 @@ async function pickRoleId(ctx: CommandContext, currentRoleId: string): Promise<s
 
   const {select} = await import("@inquirer/prompts");
   return await select<string>({
-    message: "Role",
+    message: t("labelRole"),
     pageSize: 12,
     default: currentRoleId || undefined,
-    choices: roles.map((r) => ({name: r.name ?? "(unnamed role)", value: r.id ?? ""}))
+    choices: roles.map((r) => ({name: r.name ?? t("unnamedRole"), value: r.id ?? ""}))
   });
 }
 
@@ -258,10 +258,10 @@ async function pickStoreIds(ctx: CommandContext, currentStoreIds: string[]): Pro
 
   const {checkbox} = await import("@inquirer/prompts");
   const picked = await checkbox<string>({
-    message: "Permitted stores (leave empty for access to every store)",
+    message: t("permittedStoresPrompt"),
     pageSize: 12,
     choices: stores.map((s) => ({
-      name: s.locationName ?? "(unnamed store)",
+      name: s.locationName ?? t("unnamedStore"),
       value: s.id ?? "",
       checked: currentStoreIds.includes(s.id ?? "")
     }))

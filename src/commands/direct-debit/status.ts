@@ -1,7 +1,7 @@
 import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAssignedPlan} from "./_shared";
+import {fetchAssignedPlan, hasActiveMandate} from "./_shared";
 
 export default defineCommand({
   meta: {
@@ -22,7 +22,7 @@ export default defineCommand({
       return;
     }
 
-    const isSetup = plan.isDirectDebitSetup === true;
+    const isSetup = hasActiveMandate(plan);
     ctx.print({
       isDirectDebitSetup: isSetup,
       // A merchant with no mandate has no status to report; saying so beats an empty cell,

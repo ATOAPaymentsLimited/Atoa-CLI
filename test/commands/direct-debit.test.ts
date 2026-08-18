@@ -11,7 +11,7 @@ const mock = vi.hoisted(() => {
       requests.length = 0;
       printed = undefined;
     },
-    isDirectDebitSetup: false,
+    mandateActive: false,
     buildContext: async (opts: any) => ({
       env: "sandbox",
       http: {
@@ -19,12 +19,12 @@ const mock = vi.hoisted(() => {
         request: async (req: any) => {
           requests.push({method: req.method, path: req.path, auth: req.auth, body: req.body});
           if (req.path === "/api/plan/:businessId/assignedPlan" && req.method === "GET") {
+            // Shaped like the real response: there is NO `isDirectDebitSetup` field — whether a
+            // mandate exists is derived from the mandate's own status. An earlier mock invented
+            // that field, so code reading it passed the tests and always read undefined live.
             return {
               status: 200,
-              data: {
-                isDirectDebitSetup: mock.isDirectDebitSetup,
-                stripeCustomer: {mandateDetails: {status: mock.isDirectDebitSetup ? "active" : undefined}}
-              },
+              data: {stripeCustomer: {mandateDetails: mock.mandateActive ? {status: "active"} : undefined}},
               requestId: "r"
             };
           }
@@ -59,7 +59,7 @@ import directDebitSetup from "../../src/commands/direct-debit/setup";
 
 beforeEach(() => {
   mock.reset();
-  mock.isDirectDebitSetup = false;
+  mock.mandateActive = false;
   process.exitCode = 0;
 });
 
@@ -76,7 +76,7 @@ const FULL_ARGS = {
 
 describe("direct-debit status", () => {
   it("GETs assignedPlan and prints mandate state", async () => {
-    mock.isDirectDebitSetup = true;
+    mock.mandateActive = true;
     await (directDebitStatus.run as any)({args: {}, rawArgs: []});
     expect(mock.requests[0]).toMatchObject({method: "GET", path: "/api/plan/:businessId/assignedPlan"});
     expect(mock.getPrinted()).toMatchObject({isDirectDebitSetup: true, mandateStatus: "active"});
@@ -117,7 +117,7 @@ describe("direct-debit setup", () => {
     expect(postReq!.body.updateBacs).toBe(false);
   });
 
-  it("hardcodes the GB/UK address pair the dashboard sends, and strips postcode spaces", async () => {
+  it("fixes the GB/UK address pair and strips postcode spaces", async () => {
     await (directDebitSetup.run as any)({args: {...FULL_ARGS, postalCode: "SW1 1AA"}, rawArgs: []});
     const postReq = mock.requests.find((r) => r.method === "POST");
     expect(postReq!.body.payment_method_data.billing_details.address).toMatchObject({
@@ -127,8 +127,10 @@ describe("direct-debit setup", () => {
     });
   });
 
-  it("errors (exit 3) on a non-TTY run when a mandate is already active (needs interactive confirm)", async () => {
-    mock.isDirectDebitSetup = true;
+  // Derived from the mandate status, not a field on the response — reading a non-existent
+  // `isDirectDebitSetup` made this guard silently dead against the real API.
+  it("refuses outright when a mandate is already active", async () => {
+    mock.mandateActive = true;
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await (directDebitSetup.run as any)({args: FULL_ARGS, rawArgs: []});
     expect(process.exitCode).toBe(3);
