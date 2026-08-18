@@ -1,3 +1,5 @@
+import {Toggle} from "../../lib/enums";
+
 export interface ChannelRow {
   channel: string;
   isEnabled: boolean;
@@ -15,11 +17,8 @@ export interface TopicRow {
 }
 
 /**
- * One topic as "Name [id]" followed by an indented channel per line. Shared by `list` and
- * `set` so a write is confirmed in exactly the shape the read uses.
- *
- * Three states, not two: a channel the backend refuses (`isAvailable: false`) must not render
- * as plain "off", or you can't tell "I turned this off" from "this can never be on".
+ * One topic as "Name [id]" plus an indented channel per line, shared by `list` and `set`.
+ * Three states, not two: an unavailable channel must not read as plain "off".
  */
 export function formatTopic(topic: TopicRow): string {
   const perm = topic.hasPermission
@@ -30,8 +29,8 @@ export function formatTopic(topic: TopicRow): string {
   for (const ch of topic.channels ?? []) {
     const state = ch.isAvailable
       ? ch.isEnabled
-        ? "on"
-        : "off"
+        ? Toggle.ON
+        : Toggle.OFF
       : `unavailable${ch.unavailableReason ? ` (${ch.unavailableReason})` : ""}`;
     lines.push(`  ${ch.channel.padEnd(6)} ${state}`);
   }

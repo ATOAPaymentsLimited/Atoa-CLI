@@ -7,7 +7,7 @@ import {AtoaError} from "../../lib/errors";
 import {pickPermissionIds, resolvePermissionIds, withUpgradeHint, parseRepeatedFlag, projectRole} from "./_shared";
 import {resolveField} from "../../lib/prompt-field";
 import {validateRoleName} from "../../lib/validators";
-import t from "../../locales/en.json";
+import {t} from "../../lib/i18n";
 
 type RolesUpdateArgs = CommonOptions & {
   roleId?: string;
@@ -57,7 +57,7 @@ export default defineCommand({
     const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)) as RoleRow[];
 
     if (!roleId) {
-      if (!interactive) throw new AtoaError("roleId is required (non-interactive)", "validation");
+      if (!interactive) throw new AtoaError(t("argRequiredNonInteractive", {arg: "roleId"}), "validation");
       roleId = await pickRoleId(rows);
     }
 
@@ -74,7 +74,7 @@ export default defineCommand({
       name = await resolveField({
         value: undefined,
         flag: "name",
-        message: t.labelRoleName,
+        message: t("labelRoleName"),
         rule: validateRoleName,
         interactive,
         default: existing.name
@@ -82,9 +82,9 @@ export default defineCommand({
     }
     if (interactive && args.description === undefined) {
       const {input} = await import("@inquirer/prompts");
-      description = (await input({message: t.labelRoleDescription, default: existing.description})).trim();
+      description = (await input({message: t("labelRoleDescription"), default: existing.description})).trim();
     }
-    if (!name) throw new AtoaError("role name is required", "validation");
+    if (!name) throw new AtoaError(t("roleNameIsRequired"), "validation");
 
     if (!permissionsTouched && interactive) {
       permissionIds = await pickPermissionIds(ctx, existingPermissionIds);
@@ -99,7 +99,7 @@ export default defineCommand({
     const descriptionChanged = (description || "") !== (existing.description || "");
     const permissionsChanged = permissionsTouched && !sameSet(permissionIds, existingPermissionIds);
     if (!nameChanged && !descriptionChanged && !permissionsChanged) {
-      ctx.print({status: "No changes", role: existing.name});
+      ctx.print({status: t("noChanges"), role: existing.name});
       return;
     }
 
@@ -122,13 +122,13 @@ export default defineCommand({
 });
 
 async function pickRoleId(rows: RoleRow[]): Promise<string> {
-  if (rows.length === 0) throw new AtoaError("no roles found for this business", "not_found");
+  if (rows.length === 0) throw new AtoaError(t("noRolesFound"), "not_found");
   const {select} = await import("@inquirer/prompts");
   const roleId = await select<string>({
-    message: "Select a role to update",
+    message: t("selectRoleToUpdate"),
     pageSize: 12,
-    choices: rows.map((r) => ({name: r.name ?? "(unnamed role)", value: r.id ?? ""}))
+    choices: rows.map((r) => ({name: r.name ?? t("unnamedRole"), value: r.id ?? ""}))
   });
-  if (!roleId) throw new AtoaError("no role selected", "validation");
+  if (!roleId) throw new AtoaError(t("noRoleSelected"), "validation");
   return roleId;
 }

@@ -1,6 +1,8 @@
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
+import {BackendErrorCode} from "../../lib/enums";
 import type {CommandContext} from "../../lib/context";
+import {t} from "../../lib/i18n";
 
 interface PermissionRow {
   id?: string;
@@ -20,14 +22,10 @@ async function fetchCategories(ctx: CommandContext): Promise<PermissionCategoryR
   const {data} = await ctx.http.request({...V1_ROUTES.permissions.list});
   const categories = ((data as {availablePermissions?: PermissionCategoryRow[]})?.availablePermissions ??
     []) as PermissionCategoryRow[];
-  // An empty catalogue is indistinguishable from "the user deselected everything" once we
-  // return []. Callers set permissionsTouched on the result, so returning [] here would send
-  // permissionIds: [] and strip every permission from the role. Fail loudly instead.
+  // Returning [] here would be read as "deselect everything" and strip the role's permissions,
+  // so an empty catalogue fails loudly instead.
   if (categories.length === 0) {
-    throw new AtoaError(
-      "Could not load the permission catalogue, so permissions were left unchanged. Retry, or pass --permission explicitly.",
-      "generic"
-    );
+    throw new AtoaError(t("permissionCatalogueUnavailable"), "generic");
   }
   return categories;
 }
@@ -43,12 +41,8 @@ function indexPermissions(categories: PermissionCategoryRow[]): PermissionIndex 
 }
 
 /**
- * Adds every permission the chosen ones depend on, following the chain to the end.
- *
- * A role that grants "refund a payment" without "view payments" is broken, so the picker
- * ticks the prerequisites for you as you select. A terminal checkbox has no per-toggle hook,
- * so the same closure is applied once the selection is made — and what it added is printed,
- * because silently granting a permission nobody asked for is worse than the gap it fixes.
+ * Adds every prerequisite of the chosen permissions, following the chain to the end. What was
+ * added is printed — silently granting a permission nobody asked for is worse than the gap.
  */
 export function expandWithDependencies(ids: string[], index: PermissionIndex): {ids: string[]; added: string[]} {
   const chosen = new Set(ids);
@@ -68,11 +62,8 @@ export function expandWithDependencies(ids: string[], index: PermissionIndex): {
 }
 
 /**
- * Resolves flag-supplied permission ids, pulling in their prerequisites.
- *
- * Expansion is advisory: the caller named the permissions they want, so a catalogue that fails
- * to load must not sink the request. The ids go through unchanged and the backend — which
- * enforces the same dependencies — has the final say.
+ * Flag-supplied ids plus their prerequisites. Advisory only: the caller named what they want, so
+ * a catalogue that fails to load lets the ids through and leaves the backend to decide.
  */
 export async function resolvePermissionIds(ctx: CommandContext, ids: string[]): Promise<string[]> {
   if (ids.length === 0) return ids;
@@ -92,10 +83,10 @@ export async function pickPermissionIds(ctx: CommandContext, preselected: string
   const {checkbox, Separator} = await import("@inquirer/prompts");
   const choices: Array<InstanceType<typeof Separator> | {name: string; value: string; checked?: boolean}> = [];
   for (const category of categories) {
-    choices.push(new Separator(`— ${category.name ?? "Other"} —`));
+    choices.push(new Separator(`— ${category.name ?? t("categoryOther")} —`));
     for (const perm of category.permissions ?? []) {
       if (!perm.id) continue;
-      const requires = perm.dependsOnIds?.length ? "  (pulls in its prerequisites)" : "";
+      const requires = perm.dependsOnIds?.length ? `  ${t("permissionPullsInPrerequisites")}` : "";
       choices.push({
         name: `${perm.name ?? perm.id}${requires}`,
         value: perm.id,
@@ -103,13 +94,13 @@ export async function pickPermissionIds(ctx: CommandContext, preselected: string
       });
     }
   }
-  const selected = await checkbox<string>({message: "Select permissions", pageSize: 15, choices});
+  const selected = await checkbox<string>({message: t("selectPermissions"), pageSize: 15, choices});
   return announce(expandWithDependencies(selected.filter(Boolean), index));
 }
 
 function announce({ids, added}: {ids: string[]; added: string[]}): string[] {
   if (added.length > 0) {
-    process.stderr.write(`Also granted, required by your selection: ${added.join(", ")}\n`);
+    process.stderr.write(`${t("permissionsAlsoGranted")} ${added.join(", ")}\n`);
   }
   return ids;
 }
@@ -127,9 +118,8 @@ interface RoleRow {
 }
 
 /**
- * Trims a role down to what is readable in a terminal. The raw record nests the whole
- * permission catalogue entry under every grant, and every assigned user under the role — so
- * only the permission names survive, and the users become a count.
+ * The raw record nests a full catalogue entry under every grant and every assigned user under
+ * the role, so only permission names survive and the users become a count.
  */
 export function projectRole(row: RoleRow): Record<string, unknown> {
   return {
@@ -143,10 +133,10 @@ export function projectRole(row: RoleRow): Record<string, unknown> {
   };
 }
 
-/** CUSTOM_ROLES addon-limit hit: the backend rejects with errorCode ADDON_UPGRADE_REQUIRED. */
+/** CUSTOM_ROLES addon-limit hit — adds the plan-limit hint to the backend's own message. */
 export function withUpgradeHint(err: unknown): unknown {
-  if (err instanceof AtoaError && err.errorCode === "ADDON_UPGRADE_REQUIRED") {
-    return new AtoaError(`${err.message} — run 'atoa addons list' to see plan limits (custom roles)`, err.kind, {
+  if (err instanceof AtoaError && err.errorCode === BackendErrorCode.ADDON_UPGRADE_REQUIRED) {
+    return new AtoaError(`${err.message} — ${t("customRolesUpgradeHint")}`, err.kind, {
       status: err.status,
       errorCode: err.errorCode,
       requestId: err.requestId,

@@ -2,6 +2,7 @@ import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive, renderKeyValues} from "../../lib/output";
+import {MerchantStatus} from "../../lib/enums";
 
 /**
  * The backend `GET /api/merchant/:businessId/getKybStatus` returns an ad-hoc
@@ -28,7 +29,7 @@ export default defineCommand({
     }
     const {data} = await ctx.http.request({...V1_ROUTES.kyb.status});
     const kyb = (data ?? {}) as KybStatus;
-    const approved = kyb.status === "APPROVED";
+    const approved = kyb.status === MerchantStatus.APPROVED;
 
     // Approved → just the status. Otherwise the merchant only cares why it was
     // rejected, so surface the reject remarks alone.

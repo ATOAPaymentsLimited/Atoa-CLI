@@ -5,7 +5,7 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {resolveField} from "../../lib/prompt-field";
 import {STORE_FIELDS, normaliseStorePostcode} from "../../lib/validators";
-import t from "../../locales/en.json";
+import {t} from "../../lib/i18n";
 
 type StoresAddArgs = CommonOptions & {
   locationName?: string;
@@ -43,21 +43,21 @@ export default defineCommand({
     const locationName = await resolveField({
       value: args.locationName,
       flag: "location-name",
-      message: t.labelLocationName,
+      message: t("labelLocationName"),
       rule: STORE_FIELDS.locationName,
       interactive
     });
     const addressLine1 = await resolveField({
       value: args.addressLine1,
       flag: "address-line1",
-      message: t.labelAddressLine1,
+      message: t("labelAddressLine1"),
       rule: STORE_FIELDS.addressLine1,
       interactive
     });
     const addressLine2 = await resolveField({
       value: args.addressLine2,
       flag: "address-line2",
-      message: t.labelAddressLine2Optional,
+      message: t("labelAddressLine2Optional"),
       rule: STORE_FIELDS.addressLine2,
       interactive: interactive && !allRequiredGiven,
       optional: true
@@ -65,14 +65,14 @@ export default defineCommand({
     const cityOrTown = await resolveField({
       value: args.cityOrTown,
       flag: "city-or-town",
-      message: t.labelTownCity,
+      message: t("labelTownCity"),
       rule: STORE_FIELDS.cityOrTown,
       interactive
     });
     const addressPostalCode = await resolveField({
       value: args.addressPostalCode,
       flag: "address-postal-code",
-      message: t.labelPostCode,
+      message: t("labelPostCode"),
       rule: STORE_FIELDS.addressPostalCode,
       interactive
     });

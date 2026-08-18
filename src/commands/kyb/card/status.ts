@@ -4,6 +4,8 @@ import {V1_ROUTES} from "../../../lib/v1-routes";
 import {isInteractive, renderKeyValues} from "../../../lib/output";
 import {AtoaError} from "../../../lib/errors";
 import {fetchKybStatus} from "../_shared";
+import {KYB_NOT_SUBMITTED, CardApplicationStatus, type MerchantStatus} from "../../../lib/enums";
+import {t} from "../../../lib/i18n";
 
 interface CardActivationStatus {
   status?: string;
@@ -12,7 +14,7 @@ interface CardActivationStatus {
 }
 
 /** The KYB states that block card activation — see commands/kyb/_shared.ts. */
-const KYB_BLOCKS_CARD = ["PENDING", "REJECTED"];
+const KYB_BLOCKS_CARD = KYB_NOT_SUBMITTED;
 
 export default defineCommand({
   meta: {name: "status", description: "Check card-payment activation status"},
@@ -36,17 +38,16 @@ export default defineCommand({
       // would turn a stale businessId, a routing mistake or a gateway 404 into "you haven't
       // applied yet" — telling a merchant with a pending or rejected application to re-apply.
       if (err instanceof AtoaError && err.kind === "not_found" && isNoApplication(err)) {
-        card = {status: "NOT_INITIATED"};
+        card = {status: CardApplicationStatus.NOT_INITIATED};
       } else {
         throw err;
       }
     }
 
-    // Card activation is gated on KYB, so the card status alone doesn't explain a merchant who
-    // can't proceed — NOT_INITIATED reads as "you haven't applied" when the real answer is
-    // "you can't yet". Best-effort: a card status is still worth printing if this call fails.
+    // Card activation is gated on KYB: NOT_INITIATED reads as "you haven't applied" when the
+    // real answer is "you can't yet". Best-effort — the card status is worth printing regardless.
     const kybStatus = await fetchKybStatus(ctx).catch(() => undefined);
-    const kybBlocking = Boolean(kybStatus && KYB_BLOCKS_CARD.includes(kybStatus));
+    const kybBlocking = Boolean(kybStatus && KYB_BLOCKS_CARD.includes(kybStatus as MerchantStatus));
 
     if (!isInteractive(ctx.formatExplicit)) {
       ctx.print({...card, kybStatus});
@@ -58,7 +59,7 @@ export default defineCommand({
       ["Payment type", card.paymentType],
       ["Reject reason", card.rejectReason],
       ["KYB status", kybStatus],
-      ["Blocked by", kybBlocking ? "business verification — run `atoa kyb link` to complete it" : undefined]
+      ["Blocked by", kybBlocking ? t("kybBlockingCardActivation") : undefined]
     ];
     process.stdout.write(renderKeyValues("Card-payment activation", rows) + "\n");
   })

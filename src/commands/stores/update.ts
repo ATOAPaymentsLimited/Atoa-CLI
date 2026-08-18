@@ -2,12 +2,13 @@ import {defineCommand} from "citty";
 import {FormData} from "undici";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {fetchAllPages, STORES_PAGE_SIZE} from "../../lib/list-view";
+import {fetchAllPages} from "../../lib/list-view";
+import {STORES_PAGE_SIZE} from "../../lib/constants";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
 import {resolveField} from "../../lib/prompt-field";
 import {STORE_FIELDS, normaliseStorePostcode} from "../../lib/validators";
-import t from "../../locales/en.json";
+import {t} from "../../lib/i18n";
 import type {CommandContext} from "../../lib/context";
 
 type StoresUpdateArgs = CommonOptions & {
@@ -44,7 +45,7 @@ export default defineCommand({
 
     if (!storeId) {
       if (!interactive) {
-        throw new AtoaError("storeId is required (non-interactive)", "validation");
+        throw new AtoaError(t("argRequiredNonInteractive", {arg: "storeId"}), "validation");
       }
       storeId = await pickStoreId(ctx);
     }
@@ -70,11 +71,11 @@ export default defineCommand({
         default: existing[key]
       });
 
-    const locationName = await resolve("locationName", "location-name", t.labelLocationName);
-    const addressLine1 = await resolve("addressLine1", "address-line1", t.labelAddressLine1);
-    const addressLine2 = await resolve("addressLine2", "address-line2", t.labelAddressLine2Optional, true);
-    const cityOrTown = await resolve("cityOrTown", "city-or-town", t.labelTownCity);
-    const addressPostalCode = await resolve("addressPostalCode", "address-postal-code", t.labelPostCode);
+    const locationName = await resolve("locationName", "location-name", t("labelLocationName"));
+    const addressLine1 = await resolve("addressLine1", "address-line1", t("labelAddressLine1"));
+    const addressLine2 = await resolve("addressLine2", "address-line2", t("labelAddressLine2Optional"), true);
+    const cityOrTown = await resolve("cityOrTown", "city-or-town", t("labelTownCity"));
+    const addressPostalCode = await resolve("addressPostalCode", "address-postal-code", t("labelPostCode"));
 
     const fields: Record<string, string> = {
       id: storeId,
@@ -103,17 +104,17 @@ export default defineCommand({
 /** TTY-only: list stores and let the user pick one, returning its id. */
 async function pickStoreId(ctx: CommandContext): Promise<string> {
   const rows = (await fetchAllPages(ctx, V1_ROUTES.stores.list, {}, STORES_PAGE_SIZE)) as StoreFields[];
-  if (rows.length === 0) throw new AtoaError("no stores found for this business", "not_found");
+  if (rows.length === 0) throw new AtoaError(t("noStoresFound"), "not_found");
 
   const {select} = await import("@inquirer/prompts");
   const storeId = await select<string>({
-    message: "Select a store to update",
+    message: t("selectStoreToUpdate"),
     pageSize: 12,
     choices: rows.map((s) => ({
       name: `${s.locationName ?? "(unnamed)"} — ${s.addressPostalCode ?? ""}`,
       value: s.id ?? ""
     }))
   });
-  if (!storeId) throw new AtoaError("no store selected", "validation");
+  if (!storeId) throw new AtoaError(t("noStoreSelected"), "validation");
   return storeId;
 }

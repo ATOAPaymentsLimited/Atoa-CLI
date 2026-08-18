@@ -4,6 +4,7 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import type {CommandContext} from "../../lib/context";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
+import {BackendErrorCode} from "../../lib/enums";
 import {isInteractive, renderKeyValues} from "../../lib/output";
 import {withOtp} from "../../lib/otp";
 
@@ -69,7 +70,7 @@ export default defineCommand({
       body,
       onOtpSent: () => process.stderr.write("An OTP has been sent to your registered contact. Enter it below.\n"),
       resolveRetry: async (err) => {
-        if (err.errorCode !== "COP_VERIFIED_WITH_FUZZY_MATCH") return null;
+        if (err.errorCode !== BackendErrorCode.COP_VERIFIED_WITH_FUZZY_MATCH) return null;
         const registered = (err.additionalData?.["fuzzyName"] as string) || "the name your bank holds";
         const entered =
           (err.additionalData?.["registeredName"] as string) || (body["accountHolderName"] as string) || "";

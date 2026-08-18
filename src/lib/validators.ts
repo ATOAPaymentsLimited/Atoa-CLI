@@ -1,6 +1,6 @@
 // Signup/registration field validators
 
-import t from "../locales/en.json";
+import {t} from "./i18n";
 
 const NAME_RE = /^[a-zA-Z'\s]+$/;
 export const EMAIL_RE = /^([-+_0-9a-zA-Z]+(?:\.?[-+_0-9a-zA-Z])*)@((?:[0-9a-zA-Z][-\w]*\.)+[a-zA-Z0-9]{2,10})$/;
@@ -13,25 +13,25 @@ export const validateName =
     const s = (v ?? "").trim();
     if (!s) return `${label} cannot be empty`;
     if (s.length > 100) return `${label} should be at most 100 characters long`;
-    return NAME_RE.test(s) || t.dontUsePunctuation;
+    return NAME_RE.test(s) || t("dontUsePunctuation");
   };
 
 export const validateBusinessName = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (!s) return t.noBusinessNameError;
-  if (s.length < 3) return t.businessNameLengthError;
-  if (s.length > 100) return t.businessNameMaxError;
-  if (!/^[a-zA-Z0-9 ']+$/.test(s)) return t.noSpecialCharacters;
-  if (/^\d+$/.test(s.replace(/\s+/g, ""))) return t.businessNameNumberOnlyError;
+  if (!s) return t("noBusinessNameError");
+  if (s.length < 3) return t("businessNameLengthError");
+  if (s.length > 100) return t("businessNameMaxError");
+  if (!/^[a-zA-Z0-9 ']+$/.test(s)) return t("noSpecialCharacters");
+  if (/^\d+$/.test(s.replace(/\s+/g, ""))) return t("businessNameNumberOnlyError");
   return true;
 };
 
 export const validateAddress = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (s.length <= 2) return t.addressError;
-  if (s.length > 120) return t.addressMaxError;
+  if (s.length <= 2) return t("addressError");
+  if (s.length > 120) return t("addressMaxError");
   // Allowed: letters, digits, space and , ' & : -
-  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || t.addressCharactersError;
+  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || t("addressCharactersError");
 };
 
 // Address line 2 is optional and carries no rules beyond the character filter line 1 uses.
@@ -39,15 +39,15 @@ export const validateAddress = (v: string): true | string => {
 export const validateAddressLine2 = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  if (s.length > 120) return t.addressMaxError;
-  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || t.addressCharactersError;
+  if (s.length > 120) return t("addressMaxError");
+  return /^[a-zA-Z0-9,'&: -]+$/.test(s) || t("addressCharactersError");
 };
 
 export const validatePostcode = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (s.length <= 2) return t.postalCodeError;
-  if (s.length > (s.includes(" ") ? 8 : 7)) return t.postalCodeError;
-  return /^[a-zA-Z0-9 ]+$/.test(s) || t.postalCodeError;
+  if (s.length <= 2) return t("postalCodeError");
+  if (s.length > (s.includes(" ") ? 8 : 7)) return t("postalCodeError");
+  return /^[a-zA-Z0-9 ]+$/.test(s) || t("postalCodeError");
 };
 
 /*
@@ -68,33 +68,33 @@ const storeText =
   (v: string): true | string => {
     const s = (v ?? "").trim();
     if (!s) return optional ? true : msg.empty;
-    if (!STORE_TEXT_RE.test(s)) return t.noSpecialCharacters;
+    if (!STORE_TEXT_RE.test(s)) return t("noSpecialCharacters");
     if (s.length < 3) return msg.tooShort;
     return s.length <= max || msg.tooLong;
   };
 
 export const validateStoreName = (v: string): true | string => {
   const base = storeText(
-    {empty: t.locationNameEmptyErrMsg, tooShort: t.locationNameLengthErrMsg, tooLong: t.locationNameMaxErrMsg},
+    {empty: t("locationNameEmptyErrMsg"), tooShort: t("locationNameLengthErrMsg"), tooLong: t("locationNameMaxErrMsg")},
     30
   )(v);
   if (base !== true) return base;
   // The business's own store is named "Default"; reusing the name collides with it.
-  return (v ?? "").trim().toLowerCase() !== "default" || t.defaultLocationNameErrMsg;
+  return (v ?? "").trim().toLowerCase() !== "default" || t("defaultLocationNameErrMsg");
 };
 
 export const validateStoreAddressLine1 = storeText(
-  {empty: t.addressLine1EmptyErrMsg, tooShort: t.addressLine1LengthErrMsg, tooLong: t.addressLine1MaxErrMsg},
+  {empty: t("addressLine1EmptyErrMsg"), tooShort: t("addressLine1LengthErrMsg"), tooLong: t("addressLine1MaxErrMsg")},
   255
 );
 
 export const validateStoreCity = storeText(
-  {empty: t.townCityEmptyErrMsg, tooShort: t.townCityLengthErrMsg, tooLong: t.townCityMaxErrMsg},
+  {empty: t("townCityEmptyErrMsg"), tooShort: t("townCityLengthErrMsg"), tooLong: t("townCityMaxErrMsg")},
   120
 );
 
 export const validateStoreAddressLine2 = storeText(
-  {empty: "", tooShort: t.addressLine2LengthErrMsg, tooLong: t.addressLine2MaxErrMsg},
+  {empty: "", tooShort: t("addressLine2LengthErrMsg"), tooLong: t("addressLine2MaxErrMsg")},
   120,
   true
 );
@@ -105,10 +105,10 @@ export const validateStoreAddressLine2 = storeText(
  */
 export const validateStorePostcode = (v: string): true | string => {
   const s = normaliseStorePostcode(v);
-  if (!s) return t.postCodeEmptyErrMsg;
-  if (!/^[a-zA-Z0-9]+$/.test(s)) return t.noSpecialCharacters;
-  if (s.length < 3) return t.postCodeLengthErrorMsg;
-  return s.length <= 7 || t.postCodeMaxErrorMsg;
+  if (!s) return t("postCodeEmptyErrMsg");
+  if (!/^[a-zA-Z0-9]+$/.test(s)) return t("noSpecialCharacters");
+  if (s.length < 3) return t("postCodeLengthErrorMsg");
+  return s.length <= 7 || t("postCodeMaxErrorMsg");
 };
 
 export const normaliseStorePostcode = (v: string): string => (v ?? "").replace(/\s+/g, "");
@@ -120,16 +120,16 @@ export const normaliseStorePostcode = (v: string): string => (v ?? "").replace(/
  */
 export const validateSmsSenderName = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (!/^[A-Za-z0-9\s]*$/.test(s)) return t.noSpecialCharacters;
-  if (s.length < 3) return t.brandNameTooShort;
-  return s.length <= 11 || t.brandNameTooLong;
+  if (!/^[A-Za-z0-9\s]*$/.test(s)) return t("noSpecialCharacters");
+  if (s.length < 3) return t("brandNameTooShort");
+  return s.length <= 11 || t("brandNameTooLong");
 };
 
 export const validateRoleName = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (!s) return t.roleNameIsRequired;
-  if (s.length < 3) return t.roleNameLengthError;
-  return s.length <= 100 || t.roleNameMaxError;
+  if (!s) return t("roleNameIsRequired");
+  if (s.length < 3) return t("roleNameLengthError");
+  return s.length <= 100 || t("roleNameMaxError");
 };
 
 /**
@@ -142,7 +142,7 @@ export const validateStaffName =
   (v: string): true | string => {
     const s = (v ?? "").trim();
     const ok = Boolean(s) && s.length <= 100 && NAME_RE.test(s);
-    return ok || (which === "first" ? t.firstNameError : t.lastNameError);
+    return ok || (which === "first" ? t("firstNameError") : t("lastNameError"));
   };
 
 /** Store field name → rule, so `stores add` and `stores update` cannot drift apart. */
@@ -159,11 +159,11 @@ export const VAT_RE = /^(GB)?\d{9}$/i;
 
 export const validateVatNumber = (v: string): true | string => {
   const s = (v ?? "").trim();
-  if (!s) return t.vatRequiredError;
+  if (!s) return t("vatRequiredError");
   // Validate the normalised form so "GB 123 456 789" and "gb123456789" are accepted —
   // the postcode prompt already normalises this way, and VAT is printed with spaces
   // on most invoices.
-  return VAT_RE.test(normaliseVatNumber(s)) || t.vatError;
+  return VAT_RE.test(normaliseVatNumber(s)) || t("vatError");
 };
 
 /**
@@ -193,7 +193,7 @@ const isValidWebsite = (raw: string): boolean => {
 export const validateWebsiteUrl = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  return isValidWebsite(s) || t.websiteUrlValidationErrorMsg;
+  return isValidWebsite(s) || t("websiteUrlValidationErrorMsg");
 };
 
 /** VAT accepts an optional GB prefix and tolerates spacing/case; normalise before sending. */
@@ -203,13 +203,13 @@ export const normaliseVatNumber = (v: string): string => (v ?? "").replace(/\s+/
 export const validateCountryCode = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  return /^\d{1,4}$/.test(s) || t.invalidCountryCode;
+  return /^\d{1,4}$/.test(s) || t("invalidCountryCode");
 };
 
 export const validatePhoneNumber = (v: string): true | string => {
   const s = (v ?? "").trim();
   if (!s) return true;
-  if (!/^\d+$/.test(s)) return t.phoneNumberError;
-  if (s.length > 11) return t.phoneNumberError;
-  return s.replace(/^0+/, "").length >= 10 || t.phoneNumberError;
+  if (!/^\d+$/.test(s)) return t("phoneNumberError");
+  if (s.length > 11) return t("phoneNumberError");
+  return s.replace(/^0+/, "").length >= 10 || t("phoneNumberError");
 };

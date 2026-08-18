@@ -5,21 +5,14 @@ import {stripControlChars} from "./output";
 /** Minimal route shape (matches V1_ROUTES entries: {method, path, auth}). */
 type Route = {method: HttpMethod; path: string; auth: AuthMode};
 
+export const DEFAULT_PAGE_SIZE = 50;
+
 /**
  * Fetches every page of a list endpoint and returns a flat array of rows.
  * - Paginated endpoints return `{data, totalCount, page, size}` (Pageable is 0-based) — we loop
  *   pages until we've collected `totalCount` rows.
  * - Bare-array endpoints (no pagination) pass straight through on the first request.
  */
-export const DEFAULT_PAGE_SIZE = 50;
-
-/**
- * Stores are fetched 200 at a time. The loop pages through everything at any size, but stores
- * are the list most often read whole — every store picker loads the full set — so the larger
- * page saves round-trips where it actually shows.
- */
-export const STORES_PAGE_SIZE = 200;
-
 export async function fetchAllPages(
   ctx: CommandContext,
   route: Route,

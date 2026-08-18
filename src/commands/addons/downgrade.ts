@@ -11,6 +11,7 @@ import {
   resolveTargetPlan,
   downgradeBlockers
 } from "./_shared";
+import {t} from "../../lib/i18n";
 
 type DowngradeArgs = CommonOptions & {planId?: string};
 
@@ -67,7 +68,7 @@ export default defineCommand({
 
     if (!ctx.yes) {
       if (!isInteractive(ctx.formatExplicit)) {
-        throw new AtoaError("pass --yes to change the plan without a confirmation prompt", "validation");
+        throw new AtoaError(t("passYesToChangePlan"), "validation");
       }
       const when = estimate.downgradeDate ? ` It takes effect ${estimate.downgradeDate}.` : "";
       const charges = estimate.estimatedCharges != null ? ` Estimated charges: £${estimate.estimatedCharges}.` : "";
@@ -87,7 +88,7 @@ export default defineCommand({
       // The endpoint echoes the whole plan record back. A merchant who just confirmed a
       // downgrade wants to know it is scheduled and when it lands — not to re-read the plan.
       ctx.print({
-        status: "Downgrade scheduled",
+        status: t("downgradeScheduled"),
         from: current.addonPlan?.name,
         to: target.name,
         monthlyAmount: target.monthlyAmount,

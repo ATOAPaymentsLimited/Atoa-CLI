@@ -5,6 +5,7 @@ import {fetchAllPages} from "../../lib/list-view";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
 import type {CommandContext} from "../../lib/context";
+import {t} from "../../lib/i18n";
 
 type StaffRemoveArgs = CommonOptions & {userId?: string};
 
@@ -23,7 +24,7 @@ export default defineCommand({
     let display: string | undefined;
 
     if (!userId) {
-      if (!interactive) throw new AtoaError("userId is required (non-interactive)", "validation");
+      if (!interactive) throw new AtoaError(t("argRequiredNonInteractive", {arg: "userId"}), "validation");
       const picked = await pickStaffMember(ctx);
       userId = picked.id;
       display = picked.display;
@@ -31,7 +32,7 @@ export default defineCommand({
 
     if (!ctx.yes) {
       if (!interactive) {
-        throw new AtoaError("pass --yes to remove without a confirmation prompt (non-interactive)", "validation");
+        throw new AtoaError(t("passYesToRemove"), "validation");
       }
       const {confirm} = await import("@inquirer/prompts");
       const ok = await confirm({message: `Remove ${display ?? userId} from this business?`, default: false});
@@ -61,18 +62,18 @@ async function pickStaffMember(ctx: CommandContext): Promise<{id: string; displa
     id?: string;
     user?: {id?: string; firstName?: string; lastName?: string; email?: string};
   }>;
-  if (rows.length === 0) throw new AtoaError("no staff found for this business", "not_found");
+  if (rows.length === 0) throw new AtoaError(t("noStaffFound"), "not_found");
 
   const {select} = await import("@inquirer/prompts");
   const picked = await select<{id: string; display: string}>({
-    message: "Select a staff member to remove",
+    message: t("selectStaffToRemove"),
     pageSize: 12,
     choices: rows.map((s) => {
       const fullName = [s.user?.firstName, s.user?.lastName].filter(Boolean).join(" ");
-      const display = fullName || s.user?.email || s.user?.id || "(unknown)";
+      const display = fullName || s.user?.email || s.user?.id || t("unknown");
       return {name: display, value: {id: s.user?.id ?? "", display}};
     })
   });
-  if (!picked.id) throw new AtoaError("no staff member selected", "validation");
+  if (!picked.id) throw new AtoaError(t("noStaffSelected"), "validation");
   return picked;
 }

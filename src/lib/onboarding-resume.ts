@@ -1,4 +1,6 @@
-const EDITABLE_STATUSES = new Set(["PENDING", "REJECTED", "KYB_HOLD"]);
+import {MerchantStatus} from "./enums";
+
+const EDITABLE_STATUSES: readonly string[] = [MerchantStatus.PENDING, MerchantStatus.REJECTED, MerchantStatus.KYB_HOLD];
 
 export interface BusinessRecord {
   status?: string | null;
@@ -13,8 +15,8 @@ export interface BusinessRecord {
 export type ResumeState = {kind: "resume"; step: 2 | 3} | {kind: "complete"} | {kind: "locked"; status: string};
 
 export function onboardingResumeState(business: BusinessRecord): ResumeState {
-  const status = business.status || "PENDING";
-  if (!EDITABLE_STATUSES.has(status)) return {kind: "locked", status};
+  const status = business.status || MerchantStatus.PENDING;
+  if (!EDITABLE_STATUSES.includes(status)) return {kind: "locked", status};
   const info = business.businessInfo ?? {};
   if (!info.companyType) return {kind: "resume", step: 2};
   if (!info.addressLine1 || !info.addressPostalCode) return {kind: "resume", step: 3};

@@ -1,5 +1,6 @@
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
+import {AddonFeatureType} from "../../lib/enums";
 import type {CommandContext} from "../../lib/context";
 
 /** One row of `GET merchant/addonPlan/:businessId/featureUsage`. */
@@ -85,7 +86,7 @@ export function downgradeBlockers(usage: FeatureUsage[], target: AddonPlan): str
 
     if (!feature) {
       // One bank account is always permitted, even on plans without the feature.
-      if (featureType === "MULTI_BANK_ACCOUNT" && used === 1) continue;
+      if (featureType === AddonFeatureType.MULTI_BANK_ACCOUNT && used === 1) continue;
       if (used > 0) blockers.push(`${featureType}: in use (${used}) but not included in ${target.name}`);
       continue;
     }

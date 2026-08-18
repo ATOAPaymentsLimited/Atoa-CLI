@@ -4,6 +4,8 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
 import {isInteractive} from "../../lib/output";
 import {formatTopic, type TopicRow} from "./_shared";
+import {CommsChannel, Toggle} from "../../lib/enums";
+import {t} from "../../lib/i18n";
 
 type CommsSetArgs = CommonOptions & {
   topic: string;
@@ -12,7 +14,8 @@ type CommsSetArgs = CommonOptions & {
   push?: string;
 };
 
-const ON_OFF = new Set(["on", "off"]);
+const ON_OFF: readonly string[] = [Toggle.ON, Toggle.OFF];
+const ON_OFF_HINT = ON_OFF.join("|");
 
 export default defineCommand({
   meta: {
@@ -21,9 +24,9 @@ export default defineCommand({
   },
   args: withCommonArgs({
     topic: {type: "positional", required: true, description: "topic ID or display name (from `atoa comms list`)"},
-    email: {type: "string", description: "on|off"},
-    sms: {type: "string", description: "on|off"},
-    push: {type: "string", description: "on|off"}
+    email: {type: "string", description: ON_OFF_HINT},
+    sms: {type: "string", description: ON_OFF_HINT},
+    push: {type: "string", description: ON_OFF_HINT}
   }),
   run: runWithContext<CommsSetArgs>(async (ctx, args) => {
     const topicArg = args.topic?.trim();
@@ -47,9 +50,9 @@ export default defineCommand({
       throw new AtoaError(topic.noPermissionMessage || `no permission to manage "${topic.displayName}"`, "forbidden");
     }
 
-    assertChannelAvailable(topic, "EMAIL", email);
-    assertChannelAvailable(topic, "SMS", sms);
-    assertChannelAvailable(topic, "PUSH", push);
+    assertChannelAvailable(topic, CommsChannel.EMAIL, email);
+    assertChannelAvailable(topic, CommsChannel.SMS, sms);
+    assertChannelAvailable(topic, CommsChannel.PUSH, push);
 
     const preference: Record<string, unknown> = {topicId: topic.topicId};
     if (email !== undefined) preference["emailEnabled"] = email;
@@ -79,12 +82,14 @@ export default defineCommand({
 function parseOnOff(value: string | undefined, flag: string): boolean | undefined {
   if (value === undefined) return undefined;
   const v = value.trim().toLowerCase();
-  if (!ON_OFF.has(v)) throw new AtoaError(`${flag} must be "on" or "off"`, "validation");
-  return v === "on";
+  if (!ON_OFF.includes(v)) {
+    throw new AtoaError(t("flagMustBeOnOrOff", {flag}), "validation");
+  }
+  return v === Toggle.ON;
 }
 
 /** Refuses with the backend's own unavailability reason rather than a generic error. */
-function assertChannelAvailable(topic: TopicRow, channelName: string, requested: boolean | undefined): void {
+function assertChannelAvailable(topic: TopicRow, channelName: CommsChannel, requested: boolean | undefined): void {
   if (requested === undefined) return;
   const channel = (topic.channels ?? []).find((c) => c.channel === channelName);
   if (channel && !channel.isAvailable) {
