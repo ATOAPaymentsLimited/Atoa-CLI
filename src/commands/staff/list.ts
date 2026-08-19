@@ -17,7 +17,7 @@ export default defineCommand({
     // rather than the raw record with its nested relations.
     const rows = (await fetchAllPages(ctx, V1_ROUTES.staff.list)).map((r) => projectStaff(r as never));
     await presentList(ctx, rows, {
-      title: "Staff",
+      title: t("titleStaff"),
       line: (s) => [s["name"], s["email"], s["role"]].filter(Boolean).join("  ·  ")
     });
   })

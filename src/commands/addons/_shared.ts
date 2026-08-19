@@ -113,7 +113,7 @@ export function partitionByDirection(
 }
 
 export function formatPlanChoice(p: AddonPlan): string {
-  const price = p.monthlyAmount != null ? `£${p.monthlyAmount}/mo` : "price n/a";
+  const price = p.monthlyAmount != null ? `£${p.monthlyAmount}/mo` : t("priceUnavailable");
   return `${p.name} — ${price}`;
 }
 

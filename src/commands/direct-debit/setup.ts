@@ -131,7 +131,9 @@ async function pickInstitutionCode(ctx: CommandContext): Promise<string | undefi
       pageSize: 12,
       choices: [
         ...usable.map((b) => ({
-          name: [b.fullName || b.name, b.businessBank ? "Business" : "Personal"].filter(Boolean).join("  ·  "),
+          name: [b.fullName || b.name, b.businessBank ? t("bankTypeBusiness") : t("bankTypePersonal")]
+            .filter(Boolean)
+            .join("  ·  "),
           value: b.bankCode
         })),
         {name: t("optionSkip"), value: undefined}
