@@ -17,7 +17,7 @@ interface CardActivationStatus {
 const KYB_BLOCKS_CARD = KYB_NOT_SUBMITTED;
 
 export default defineCommand({
-  meta: {name: "status", description: "Check card-payment activation status"},
+  meta: {name: "status", description: t("cmdKybCardStatus")},
   args: withCommonArgs({}),
   run: runWithContext(async (ctx) => {
     if (ctx.dryRun) {

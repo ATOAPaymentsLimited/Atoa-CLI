@@ -38,9 +38,11 @@ const mock = vi.hoisted(() => {
   };
 });
 
+// These are SDK-key commands: they authenticate with a minted key, not the browser session,
+// so the SDK context is what has to be stubbed.
 vi.mock("../../src/lib/context", async () => {
   const actual = await vi.importActual<any>("../../src/lib/context");
-  return {...actual, buildContext: mock.buildContext};
+  return {...actual, buildSdkContext: mock.buildContext};
 });
 
 import get from "../../src/commands/get";
@@ -71,19 +73,18 @@ describe("get", () => {
     expect(mock.requests[0].query).toMatchObject({limit: "5", search: "jane"});
   });
 
-  // Regression: these commands run under runWithContext (a JWT context whose authHeader is
-  // literally "unused"), so omitting `auth` let http.ts fall back to its "sdk" default and
-  // every request 401'd. Assert the mode explicitly — the shape assertions above passed
-  // throughout because the mock ignored auth entirely.
-  it("sends jwt auth, not the sdk default", async () => {
+  // These raw-request commands run under the SDK-key context, so they leave `auth` unset and
+  // let the client apply its SDK default. Asserted explicitly: the shape assertions above pass
+  // either way, so nothing else here would notice the mode changing.
+  it("leaves auth unset so the SDK default applies", async () => {
     await (get.run as any)({args: {path: "/api/customers"}, rawArgs: []});
-    expect(mock.requests[0].auth).toBe("jwt");
+    expect(mock.requests[0].auth).toBeUndefined();
   });
 
-  it("sends jwt auth on the --page-all path too", async () => {
+  it("leaves auth unset on the --page-all path too", async () => {
     await (get.run as any)({args: {path: "/api/customers", pageAll: true}, rawArgs: []});
     expect(mock.requests.length).toBeGreaterThan(0);
-    for (const req of mock.requests) expect(req.auth).toBe("jwt");
+    for (const req of mock.requests) expect(req.auth).toBeUndefined();
   });
 });
 
@@ -100,9 +101,9 @@ describe("post", () => {
     });
   });
 
-  it("sends jwt auth, not the sdk default", async () => {
+  it("leaves auth unset so the SDK default applies", async () => {
     await (post.run as any)({args: {path: "/api/customers"}, rawArgs: []});
-    expect(mock.requests[0].auth).toBe("jwt");
+    expect(mock.requests[0].auth).toBeUndefined();
   });
 });
 
@@ -112,8 +113,8 @@ describe("delete", () => {
     expect(mock.requests[0]).toMatchObject({method: "DELETE", path: "/api/customers/cus_1"});
   });
 
-  it("sends jwt auth, not the sdk default", async () => {
+  it("leaves auth unset so the SDK default applies", async () => {
     await (del.run as any)({args: {path: "/api/customers/cus_1", yes: true}, rawArgs: []});
-    expect(mock.requests[0].auth).toBe("jwt");
+    expect(mock.requests[0].auth).toBeUndefined();
   });
 });

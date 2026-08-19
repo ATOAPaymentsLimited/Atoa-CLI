@@ -1,7 +1,8 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 
 export default defineCommand({
-  meta: {name: "stores", description: "Merchant store operations"},
+  meta: {name: "stores", description: t("cmdStores")},
   subCommands: {
     list: () => import("./list").then((m) => m.default),
     get: () => import("./get").then((m) => m.default),

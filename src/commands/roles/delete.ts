@@ -14,9 +14,9 @@ interface RoleRow {
 }
 
 export default defineCommand({
-  meta: {name: "delete", description: "Delete a custom role"},
+  meta: {name: "delete", description: t("cmdRolesDelete")},
   args: withCommonArgs({
-    roleId: {type: "positional", required: false, description: "role ID (omit to pick from the role list on a TTY)"}
+    roleId: {type: "positional", required: false, description: t("argRoleIdOptional")}
   }),
   run: runWithContext<RolesDeleteArgs>(async (ctx, args) => {
     const interactive = isInteractive(ctx.formatExplicit);
@@ -24,7 +24,7 @@ export default defineCommand({
     let display: string | undefined;
 
     if (!roleId) {
-      if (!interactive) throw new AtoaError("roleId is required (non-interactive)", "validation");
+      if (!interactive) throw new AtoaError(t("roleIdRequiredNonInteractive"), "validation");
       const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)) as RoleRow[];
       const picked = await pickRole(rows);
       roleId = picked.id;
@@ -33,7 +33,7 @@ export default defineCommand({
 
     if (!ctx.yes) {
       if (!interactive) {
-        throw new AtoaError("pass --yes to delete without a confirmation prompt (non-interactive)", "validation");
+        throw new AtoaError(t("passYesToDeleteRole"), "validation");
       }
       const {confirm} = await import("@inquirer/prompts");
       const ok = await confirm({message: `Delete role "${display ?? roleId}"?`, default: false});
@@ -52,13 +52,13 @@ export default defineCommand({
 });
 
 async function pickRole(rows: RoleRow[]): Promise<{id: string; name: string}> {
-  if (rows.length === 0) throw new AtoaError("no roles found for this business", "not_found");
+  if (rows.length === 0) throw new AtoaError(t("noRolesFound"), "not_found");
   const {select} = await import("@inquirer/prompts");
   const picked = await select<{id: string; name: string}>({
-    message: "Select a role to delete",
+    message: t("selectRoleToDelete"),
     pageSize: 12,
     choices: rows.map((r) => ({name: r.name ?? t("unnamedRole"), value: {id: r.id ?? "", name: r.name ?? r.id ?? ""}}))
   });
-  if (!picked.id) throw new AtoaError("no role selected", "validation");
+  if (!picked.id) throw new AtoaError(t("noRoleSelected"), "validation");
   return picked;
 }

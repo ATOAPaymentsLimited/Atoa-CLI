@@ -31,15 +31,14 @@ const sameSet = (a: string[], b: string[]): boolean =>
   a.length === b.length && [...a].sort().every((v, i) => v === [...b].sort()[i]);
 
 export default defineCommand({
-  meta: {name: "update", description: "Update an existing custom role"},
+  meta: {name: "update", description: t("cmdRolesUpdate")},
   args: withCommonArgs({
-    roleId: {type: "positional", required: false, description: "role ID (omit to pick from the role list on a TTY)"},
-    name: {type: "string", description: "new role name"},
-    description: {type: "string", description: "new role description"},
+    roleId: {type: "positional", required: false, description: t("argRoleIdOptional")},
+    name: {type: "string", description: t("argNewRoleName")},
+    description: {type: "string", description: t("argNewRoleDescription")},
     permission: {
       type: "string",
-      description:
-        "permission ID to grant (repeatable; replaces the role's full permission set — omit to leave unchanged)"
+      description: t("argPermissionIdReplaces")
     }
   }),
   run: runWithContext<RolesUpdateArgs>(async (ctx, args, rawArgs) => {

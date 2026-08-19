@@ -1,9 +1,10 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 
 export default defineCommand({
-  meta: {name: "get", description: "Get the checkout page theme colour for this business"},
+  meta: {name: "get", description: t("cmdCustomBrandingGet")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     if (ctx.dryRun) {

@@ -7,7 +7,7 @@ import {fetchCurrentPlan} from "./_shared";
 import {t} from "../../lib/i18n";
 
 export default defineCommand({
-  meta: {name: "cancel-downgrade", description: "Cancel a scheduled downgrade and stay on the current plan"},
+  meta: {name: "cancel-downgrade", description: t("cmdAddonsCancelDowngrade")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     if (ctx.dryRun) {
@@ -22,7 +22,7 @@ export default defineCommand({
       const {confirm} = await import("@inquirer/prompts");
       const ok = await confirm({message: t("cancelDowngradePrompt"), default: false});
       if (!ok) {
-        process.stdout.write("Aborted.\n");
+        process.stdout.write(t("aborted"));
         return;
       }
     }

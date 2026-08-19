@@ -16,9 +16,9 @@ import {t} from "../../lib/i18n";
 type DowngradeArgs = CommonOptions & {planId?: string};
 
 export default defineCommand({
-  meta: {name: "downgrade", description: "Move this business to a lower addon plan (takes effect next billing cycle)"},
+  meta: {name: "downgrade", description: t("cmdAddonsDowngrade")},
   args: withCommonArgs({
-    planId: {type: "positional", required: false, description: "target plan ID (omit to pick from a list on a TTY)"}
+    planId: {type: "positional", required: false, description: t("argPlanId")}
   }),
   run: runWithContext<DowngradeArgs>(async (ctx, args) => {
     const [current, available, usage] = await Promise.all([
@@ -50,12 +50,8 @@ export default defineCommand({
     }
 
     if (blockers.length) {
-      throw new AtoaError(
-        `Cannot downgrade to ${target.name} — current usage exceeds that plan:\n` +
-          blockers.map((b) => `  • ${b}`).join("\n") +
-          "\nReduce usage first, then retry.",
-        "validation"
-      );
+      const detail = blockers.map((b) => `  • ${b}`).join("\n");
+      throw new AtoaError(t("downgradeBlockedByUsage", {plan: target.name, blockers: detail}), "validation");
     }
 
     let estimate: {estimatedCharges?: number; downgradeDate?: string} = {};
@@ -70,15 +66,22 @@ export default defineCommand({
       if (!isInteractive(ctx.formatExplicit)) {
         throw new AtoaError(t("passYesToChangePlan"), "validation");
       }
-      const when = estimate.downgradeDate ? ` It takes effect ${estimate.downgradeDate}.` : "";
-      const charges = estimate.estimatedCharges != null ? ` Estimated charges: £${estimate.estimatedCharges}.` : "";
+      const when = estimate.downgradeDate ? t("downgradeTakesEffect", {date: estimate.downgradeDate}) : "";
+      const charges =
+        estimate.estimatedCharges != null ? t("downgradeEstimatedCharges", {amount: estimate.estimatedCharges}) : "";
       const {confirm} = await import("@inquirer/prompts");
       const ok = await confirm({
-        message: `Downgrade from ${current.addonPlan?.name ?? "current plan"} to ${target.name} (£${target.monthlyAmount}/mo)?${when}${charges}`,
+        message: t("downgradeConfirm", {
+          from: current.addonPlan?.name ?? t("currentPlan"),
+          to: target.name,
+          amount: target.monthlyAmount ?? "",
+          when,
+          charges
+        }),
         default: false
       });
       if (!ok) {
-        process.stdout.write("Aborted.\n");
+        process.stdout.write(t("aborted"));
         return;
       }
     }
@@ -110,7 +113,7 @@ function withBlockerDetail(err: unknown, blockers: string[]): unknown {
   if (!(err instanceof AtoaError) || err.status !== 428) return err;
   const detail = blockers.length
     ? `\n${blockers.map((b) => `  • ${b}`).join("\n")}`
-    : "\nRun `atoa addons list` to compare current usage against the target plan.";
+    : t("downgradeRefusedCompareUsage");
   return new AtoaError(`${err.message}${detail}`, err.kind, {
     status: err.status,
     errorCode: err.errorCode,

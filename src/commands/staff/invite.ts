@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import addCommand from "./add";
 
 /**
@@ -9,5 +10,5 @@ import addCommand from "./add";
  */
 export default defineCommand({
   ...addCommand,
-  meta: {name: "invite", description: "Invite a new staff member to this business (same as `staff add`)"}
+  meta: {name: "invite", description: t("cmdStaffInvite")}
 });

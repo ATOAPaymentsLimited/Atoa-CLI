@@ -23,20 +23,20 @@ export default defineCommand({
     description: 'Toggle notification channels for a topic (e.g. "atoa comms set payouts --email off")'
   },
   args: withCommonArgs({
-    topic: {type: "positional", required: true, description: "topic ID or display name (from `atoa comms list`)"},
+    topic: {type: "positional", required: true, description: t("argCommsTopic")},
     email: {type: "string", description: ON_OFF_HINT},
     sms: {type: "string", description: ON_OFF_HINT},
     push: {type: "string", description: ON_OFF_HINT}
   }),
   run: runWithContext<CommsSetArgs>(async (ctx, args) => {
     const topicArg = args.topic?.trim();
-    if (!topicArg) throw new AtoaError("topic is required", "validation");
+    if (!topicArg) throw new AtoaError(t("topicRequired"), "validation");
 
     const email = parseOnOff(args.email, "--email");
     const sms = parseOnOff(args.sms, "--sms");
     const push = parseOnOff(args.push, "--push");
     if (email === undefined && sms === undefined && push === undefined) {
-      throw new AtoaError("provide at least one of --email, --sms, --push (on|off)", "validation");
+      throw new AtoaError(t("commsChannelFlagRequired"), "validation");
     }
 
     const {data} = await ctx.http.request({...V1_ROUTES.communicationPreferences.list});
@@ -45,9 +45,12 @@ export default defineCommand({
       (t) =>
         t.topicId.toLowerCase() === topicArg.toLowerCase() || t.displayName.toLowerCase() === topicArg.toLowerCase()
     );
-    if (!topic) throw new AtoaError(`no topic found matching "${topicArg}"`, "not_found");
+    if (!topic) throw new AtoaError(t("noTopicFound", {topic: topicArg}), "not_found");
     if (!topic.hasPermission) {
-      throw new AtoaError(topic.noPermissionMessage || `no permission to manage "${topic.displayName}"`, "forbidden");
+      throw new AtoaError(
+        topic.noPermissionMessage || t("noPermissionToManageTopic", {topic: topic.displayName}),
+        "forbidden"
+      );
     }
 
     assertChannelAvailable(topic, CommsChannel.EMAIL, email);
@@ -94,7 +97,7 @@ function assertChannelAvailable(topic: TopicRow, channelName: CommsChannel, requ
   const channel = (topic.channels ?? []).find((c) => c.channel === channelName);
   if (channel && !channel.isAvailable) {
     throw new AtoaError(
-      channel.unavailableReason || `${channelName} is not available for "${topic.displayName}"`,
+      channel.unavailableReason || t("channelUnavailableForTopic", {channel: channelName, topic: topic.displayName}),
       "validation"
     );
   }

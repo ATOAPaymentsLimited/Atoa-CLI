@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {defineCommand, runMain} from "citty";
+import {t} from "./lib/i18n";
 import packageJson from "../package.json";
 import {assertTlsHardenedEnv} from "./lib/bootstrap";
 import {printError} from "./lib/errors";
@@ -15,7 +16,7 @@ try {
 const main = defineCommand({
   meta: {
     name: "atoa",
-    description: "Atoa payment API CLI",
+    description: t("cmdRoot"),
     version: packageJson.version
   },
   subCommands: {

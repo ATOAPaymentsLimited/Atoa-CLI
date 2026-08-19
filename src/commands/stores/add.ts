@@ -16,15 +16,15 @@ type StoresAddArgs = CommonOptions & {
 };
 
 export default defineCommand({
-  meta: {name: "add", description: "Add a new merchant store"},
+  meta: {name: "add", description: t("cmdStoresAdd")},
   args: withCommonArgs({
     // Not `required: true` — on a TTY with a flag omitted we prompt for it instead of
     // hard-failing before that ever gets a chance (same reason as stores/update.ts's storeId).
-    locationName: {type: "string", description: "store name"},
-    addressLine1: {type: "string", description: "address line 1"},
-    addressLine2: {type: "string", description: "address line 2"},
-    addressPostalCode: {type: "string", description: "postal code"},
-    cityOrTown: {type: "string", description: "city or town"}
+    locationName: {type: "string", description: t("argStoreName")},
+    addressLine1: {type: "string", description: t("argAddressLine1")},
+    addressLine2: {type: "string", description: t("argAddressLine2")},
+    addressPostalCode: {type: "string", description: t("argPostalCode")},
+    cityOrTown: {type: "string", description: t("argCityOrTown")}
   }),
   run: runWithContext<StoresAddArgs>(async (ctx, args) => {
     const interactive = isInteractive(ctx.formatExplicit);

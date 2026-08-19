@@ -1,5 +1,6 @@
 import {defineCommand} from "citty";
-import {withCommonArgs, runWithContext, type CommonOptions} from "./_common";
+import {t} from "../lib/i18n";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "./_common";
 
 type GetArgs = CommonOptions & {path?: string; pageAll?: boolean};
 import {parseFieldArgs, resolvePathAndQuery} from "../lib/request-utils";
@@ -8,12 +9,14 @@ import {walkAllPages} from "../lib/pagination";
 const DEFAULT_PAGE_SIZE = 20;
 
 export default defineCommand({
-  meta: {name: "get", description: "Send a GET request  (-d key=val for path/query params)"},
+  meta: {name: "get", description: t("cmdGet")},
   args: withCommonArgs({
-    path: {type: "positional", required: true, description: "/api/path/:param"},
-    pageAll: {type: "boolean", description: "follow pagination and return all results"}
+    path: {type: "positional", required: true, description: t("argApiPath")},
+    pageAll: {type: "boolean", description: t("argPageAll")}
   }),
-  run: runWithContext<GetArgs>(async (ctx, args, rawArgs) => {
+  // SDK-key authenticated, like the other raw-request commands: these are for poking the API
+  // with a minted key, not for driving the browser-login session.
+  run: runWithSdkKey<GetArgs>(async (ctx, args, rawArgs) => {
     const fields = parseFieldArgs(rawArgs);
     const {resolvedPath, query} = resolvePathAndQuery(args.path as string, fields);
 
@@ -30,15 +33,14 @@ export default defineCommand({
           const {data} = await ctx.http.request({
             method: "GET",
             path: resolvedPath,
-            query: {...query, page: String(page), size: String(size)},
-            auth: "jwt"
+            query: {...query, page: String(page), size: String(size)}
           });
           return data;
         }
       });
       ctx.print(results);
     } else {
-      const {data} = await ctx.http.request({method: "GET", path: resolvedPath, query, auth: "jwt"});
+      const {data} = await ctx.http.request({method: "GET", path: resolvedPath, query});
       ctx.print(data);
     }
   })

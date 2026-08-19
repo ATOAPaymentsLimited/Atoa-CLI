@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAssignedPlan, hasActiveMandate} from "./_shared";
@@ -6,7 +7,7 @@ import {fetchAssignedPlan, hasActiveMandate} from "./_shared";
 export default defineCommand({
   meta: {
     name: "status",
-    description: "Show the direct-debit mandate status for platform fees"
+    description: t("cmdDirectDebitStatus")
   },
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {

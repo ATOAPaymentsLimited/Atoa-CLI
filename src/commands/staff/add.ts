@@ -21,15 +21,15 @@ type StaffAddArgs = CommonOptions & {
 };
 
 export default defineCommand({
-  meta: {name: "add", description: "Add a staff member to this business (prompts for missing fields on a TTY)"},
+  meta: {name: "add", description: t("cmdStaffAdd")},
   args: withCommonArgs({
-    firstName: {type: "string", description: "first name"},
-    lastName: {type: "string", description: "last name"},
-    email: {type: "string", description: "email address"},
-    phoneCountryCode: {type: "string", description: "phone country code, e.g. 44 (required with --phone)"},
-    phone: {type: "string", description: "phone number without country code (required with --phone-country-code)"},
-    role: {type: "string", description: "role ID (from `atoa roles list`)"},
-    store: {type: "string", description: "permitted store ID (repeatable; omit for access to every store)"}
+    firstName: {type: "string", description: t("argFirstName")},
+    lastName: {type: "string", description: t("argLastName")},
+    email: {type: "string", description: t("argEmailAddress")},
+    phoneCountryCode: {type: "string", description: t("argPhoneCountryCode")},
+    phone: {type: "string", description: t("argPhoneRequiresCode")},
+    role: {type: "string", description: t("argRoleId")},
+    store: {type: "string", description: t("argPermittedStoreId")}
   }),
   run: runWithContext<StaffAddArgs>(async (ctx, args, rawArgs) => {
     const interactive = isInteractive(ctx.formatExplicit);

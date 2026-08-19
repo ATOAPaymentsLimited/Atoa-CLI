@@ -16,11 +16,11 @@ type RolesCreateArgs = CommonOptions & {
 };
 
 export default defineCommand({
-  meta: {name: "add", description: "Add a new custom role for this business"},
+  meta: {name: "add", description: t("cmdRolesAdd")},
   args: withCommonArgs({
-    name: {type: "string", description: "role name"},
-    description: {type: "string", description: "role description"},
-    permission: {type: "string", description: "permission ID to grant (repeatable; from `atoa permissions list`)"}
+    name: {type: "string", description: t("argRoleName")},
+    description: {type: "string", description: t("argRoleDescription")},
+    permission: {type: "string", description: t("argPermissionId")}
   }),
   run: runWithContext<RolesCreateArgs>(async (ctx, args, rawArgs) => {
     const interactive = isInteractive(ctx.formatExplicit);

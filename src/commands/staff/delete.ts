@@ -10,12 +10,12 @@ import {t} from "../../lib/i18n";
 type StaffRemoveArgs = CommonOptions & {userId?: string};
 
 export default defineCommand({
-  meta: {name: "delete", description: "Delete a staff member's access to this business"},
+  meta: {name: "delete", description: t("cmdStaffDelete")},
   args: withCommonArgs({
     userId: {
       type: "positional",
       required: false,
-      description: "user ID of the staff member (omit to pick from the staff list on a TTY)"
+      description: t("argStaffUserId")
     }
   }),
   run: runWithContext<StaffRemoveArgs>(async (ctx, args) => {

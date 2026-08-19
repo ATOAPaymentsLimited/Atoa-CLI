@@ -1,11 +1,12 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages, presentList} from "../../lib/list-view";
 import {projectStaff} from "./_shared";
 
 export default defineCommand({
-  meta: {name: "list", description: "List staff members for this business"},
+  meta: {name: "list", description: t("cmdStaffList")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     if (ctx.dryRun) {
