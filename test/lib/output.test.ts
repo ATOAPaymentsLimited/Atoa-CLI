@@ -22,11 +22,15 @@ describe("resolveFormat", () => {
   it("accepts table", () => expect(resolveFormat("table")).toBe("table"));
   it("accepts yaml", () => expect(resolveFormat("yaml")).toBe("yaml"));
   it("rejects unknown value", () => expect(() => resolveFormat("xml")).toThrow());
-  it("defaults to json when stdout is not a TTY", () => {
-    const orig = process.stdout.isTTY;
-    Object.defineProperty(process.stdout, "isTTY", {value: false, configurable: true});
-    expect(resolveFormat(undefined)).toBe("json");
-    Object.defineProperty(process.stdout, "isTTY", {value: orig, configurable: true});
+  // Table, not JSON — a raw JSON dump is not a readable answer to `atoa stores list`.
+  // Scripts opt into `--output json`; the default is the human view regardless of TTY.
+  it("defaults to table when no --output is given", () => {
+    for (const isTTY of [true, false]) {
+      const orig = process.stdout.isTTY;
+      Object.defineProperty(process.stdout, "isTTY", {value: isTTY, configurable: true});
+      expect(resolveFormat(undefined)).toBe("table");
+      Object.defineProperty(process.stdout, "isTTY", {value: orig, configurable: true});
+    }
   });
 });
 

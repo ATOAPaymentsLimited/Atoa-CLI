@@ -1,27 +1,24 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages, presentList} from "../../lib/list-view";
+import {projectStaff} from "./_shared";
 
 export default defineCommand({
-  meta: {name: "list", description: "List staff members for this business"},
+  meta: {name: "list", description: t("cmdStaffList")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     if (ctx.dryRun) {
       ctx.print({...V1_ROUTES.staff.list});
       return;
     }
-    // Paginated; name/email come from the nested `user` relation and the role
-    // name from the nested `role` relation.
-    const rows = await fetchAllPages(ctx, V1_ROUTES.staff.list);
+    // Projected before display so the drill-in detail shows the same tidy shape as the summary,
+    // rather than the raw record with its nested relations.
+    const rows = (await fetchAllPages(ctx, V1_ROUTES.staff.list)).map((r) => projectStaff(r as never));
     await presentList(ctx, rows, {
-      title: "Staff",
-      line: (s) => {
-        const user = (s["user"] ?? {}) as {firstName?: string; lastName?: string; email?: string};
-        const role = s["role"] as {name?: string} | undefined;
-        const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ");
-        return [fullName || user.email, user.email, role?.name].filter(Boolean).join("  ·  ");
-      }
+      title: t("titleStaff"),
+      line: (s) => [s["name"], s["email"], s["role"]].filter(Boolean).join("  ·  ")
     });
   })
 });

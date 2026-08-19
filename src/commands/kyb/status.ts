@@ -1,7 +1,9 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive, renderKeyValues} from "../../lib/output";
+import {MerchantStatus} from "../../lib/enums";
 
 /**
  * The backend `GET /api/merchant/:businessId/getKybStatus` returns an ad-hoc
@@ -19,7 +21,7 @@ interface KybStatus {
 }
 
 export default defineCommand({
-  meta: {name: "status", description: "Get the KYB verification status for this business"},
+  meta: {name: "status", description: t("cmdKybStatus")},
   args: withCommonArgs({}),
   run: runWithContext(async (ctx) => {
     if (ctx.dryRun) {
@@ -28,7 +30,7 @@ export default defineCommand({
     }
     const {data} = await ctx.http.request({...V1_ROUTES.kyb.status});
     const kyb = (data ?? {}) as KybStatus;
-    const approved = kyb.status === "APPROVED";
+    const approved = kyb.status === MerchantStatus.APPROVED;
 
     // Approved → just the status. Otherwise the merchant only cares why it was
     // rejected, so surface the reject remarks alone.
@@ -42,11 +44,11 @@ export default defineCommand({
     }
 
     const rows: Array<[string, string | undefined]> = approved
-      ? [["Status", kyb.status]]
+      ? [[t("labelStatus"), kyb.status]]
       : [
-          ["Status", kyb.status],
-          ["Reason", kyb.rejectRemarks]
+          [t("labelStatus"), kyb.status],
+          [t("labelReason"), kyb.rejectRemarks]
         ];
-    process.stdout.write(renderKeyValues("KYB verification", rows) + "\n");
+    process.stdout.write(renderKeyValues(t("titleKybVerification"), rows) + "\n");
   })
 });

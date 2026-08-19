@@ -3,7 +3,7 @@
 /* eslint-disable max-lines */
 import {defineCommand} from "citty";
 import {randomUUID} from "node:crypto";
-import {input, confirm, select} from "@inquirer/prompts";
+import {input, confirm, select, search} from "@inquirer/prompts";
 import {withCommonArgs, type CommonOptions} from "./_common";
 import {V1_ROUTES} from "../lib/v1-routes";
 import {AtoaError, printError, exitCodeFor} from "../lib/errors";
@@ -33,16 +33,19 @@ import {
   validateName,
   validateBusinessName,
   validateAddress,
+  validateAddressLine2,
   validatePostcode,
   validateCountryCode,
-  validatePhoneNumber
+  validatePhoneNumber,
+  validateVatNumber,
+  normaliseVatNumber,
+  validateWebsiteUrl
 } from "../lib/validators";
 import {DEFAULT_PHONE_COUNTRY_CODE} from "../lib/constants";
 
 type SignupArgs = CommonOptions & {
   email?: string;
   fromStep?: string;
-  skipExtras?: boolean;
   deviceName?: string;
 };
 
@@ -53,8 +56,7 @@ export default defineCommand({
   },
   args: withCommonArgs({
     email: {type: "string", description: "email to sign up with (skips the prompt)"},
-    fromStep: {type: "string", description: "resume from step N (2-4); requires businessId already set"},
-    skipExtras: {type: "boolean", description: "skip step 4 extras and finalize immediately"},
+    fromStep: {type: "string", description: "resume from step N (2-3); requires businessId already set"},
     deviceName: {type: "string", description: "label for this device in your Atoa sessions"}
   }),
   async run({args: cittyArgs}) {
@@ -83,6 +85,15 @@ export default defineCommand({
  * already exists.
  */
 async function ensureSignedUp(args: SignupArgs): Promise<string | undefined> {
+  // `--profile <new-name>` names the profile this signup will CREATE (otpSignup passes it
+  // to deriveProfileName). resolveActiveProfile throws on a name it doesn't know, which is
+  // right for every other command but would reject exactly that case here — so look the
+  // name up directly first and go straight to account creation when it's new.
+  const explicitProfile = args.profile?.trim();
+  if (explicitProfile && !(await readProfile(explicitProfile))) {
+    return otpSignup(args);
+  }
+
   const resolved = await resolveActiveProfile(args.profile);
   if (resolved.kind === "ok") {
     const store = await createSecretsStore();
@@ -238,7 +249,7 @@ async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Pr
   // Explicit override — power-user path, no prompt.
   if (args.fromStep) {
     const n = parseInt(args.fromStep, 10);
-    if (isNaN(n) || n < 1 || n > 4) throw new AtoaError("--from-step must be a number between 1 and 4", "validation");
+    if (isNaN(n) || n < 1 || n > 3) throw new AtoaError("--from-step must be a number between 1 and 3", "validation");
     if (n === 1) return {kind: "start", fromStep: 1};
     const bizId = await getActiveBusinessId(ctx.profileName);
     if (!bizId) {
@@ -291,6 +302,44 @@ async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Pr
     return {kind: "done", message: "Nothing to do."};
   }
   return {kind: "start", fromStep: 1, startingNew: true};
+}
+
+/**
+ * Consent for the Privacy Policy, Terms of Service and marketing updates.
+ *
+ * Asked as one accept-all question that covers all three, falling back to asking each in turn
+ * when it is declined — so a merchant who wants to accept everything answers once, and one who
+ * does not still gets to choose per item. Only the Privacy Policy and Terms of Service gate
+ * onboarding; marketing stays optional either way, and defaults to off when asked on its own.
+ *
+ * Returns the marketing preference. The two required ones throw rather than return.
+ */
+async function collectConsent(): Promise<boolean> {
+  const acceptAll = await confirm({
+    message:
+      "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/) " +
+      "and Terms of Service (https://paywithatoa.co.uk/terms/), and would like marketing and product updates",
+    default: true
+  });
+  if (acceptAll) return true;
+
+  const acceptPrivacy = await confirm({
+    message: "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/)",
+    default: true
+  });
+  if (!acceptPrivacy) {
+    throw new AtoaError("You must accept the Privacy Policy to continue.", "validation");
+  }
+
+  const acceptTos = await confirm({
+    message: "I accept Atoa's Terms of Service (https://paywithatoa.co.uk/terms/)",
+    default: true
+  });
+  if (!acceptTos) {
+    throw new AtoaError("You must accept the Terms of Service to continue.", "validation");
+  }
+
+  return confirm({message: "I would like to get marketing and product updates from Atoa", default: false});
 }
 
 /** The onboarding wizard (steps 1–4), run with an authed context. */
@@ -357,38 +406,52 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     prefill = {};
   }
 
-  // ── Step 1: Business details (name, industry, consent) ───────────────────
+  // ── Step 1: Business details (name, industry, turnover, VAT, website, consent) ──
   if (fromStep <= 1) {
-    process.stderr.write("\nStep 1 of 4 — Business details\n");
+    process.stderr.write("\nStep 1 of 3 — Let's set your account up\n");
 
     const legalBusinessName = await input({message: "Business name:", validate: validateBusinessName});
 
     // Industry / business type is a server-side lookup (env-specific ids); fetch and pick.
+    // Deduplicated by name — the table carries
+    // duplicate rows (several literal "New Type" test entries), which otherwise fill the picker.
     const types = (await ctx.http.request({...V1_ROUTES.onboarding.businessTypes})).data as Array<{
       id: string;
       name: string;
     }>;
     let businessType: {id: string; name: string} | undefined;
     if (types.length) {
-      const id = await select({message: "Industry:", choices: types.map((t) => ({value: t.id, name: t.name}))});
-      businessType = types.find((t) => t.id === id);
+      const seen = new Set<string>();
+      const uniqueTypes = types.filter((t) => !seen.has(t.name) && seen.add(t.name));
+      const id = await search({
+        message: "Business industry:",
+        // Type-to-filter: the list is long enough that a plain select is unusable.
+        source: (term) => {
+          const q = (term ?? "").toLowerCase();
+          return uniqueTypes.filter((t) => t.name.toLowerCase().includes(q)).map((t) => ({value: t.id, name: t.name}));
+        }
+      });
+      businessType = uniqueTypes.find((t) => t.id === id);
     }
 
-    // Consent. Privacy Policy + Terms of Service are required; marketing updates are an optional opt-in.
-    const acceptPrivacy = await confirm({
-      message: "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/)"
-    });
-    if (!acceptPrivacy) {
-      throw new AtoaError("You must accept the Privacy Policy to continue.", "validation");
+    // Monthly turnover — server-defined bands. The display string itself is what's persisted.
+    // Required, and collected in step 1.
+    const ranges = (await ctx.http.request({...V1_ROUTES.onboarding.transactionRanges})).data as string[];
+    if (ranges.length) {
+      businessInfo.averageMonthlyTransaction = await select({
+        message: "Monthly turnover:",
+        choices: ranges.map((r) => ({value: r, name: r}))
+      });
     }
-    const acceptTos = await confirm({message: "I accept Atoa's Terms of Service (https://paywithatoa.co.uk/terms/)"});
-    if (!acceptTos) {
-      throw new AtoaError("You must accept the Terms of Service to continue.", "validation");
-    }
-    const allowMarketingEmails = await confirm({
-      message: "I would like to get marketing and product updates from Atoa.",
-      default: false
-    });
+
+    // VAT is required at signup.
+    businessInfo.vatNumber = normaliseVatNumber(await input({message: "VAT number:", validate: validateVatNumber}));
+
+    // Website is optional — blank is sent as undefined (omitted), not an empty string.
+    const websiteUrl = (await input({message: "Website URL (optional):", validate: validateWebsiteUrl})).trim();
+    if (websiteUrl) businessInfo.webSiteUrl = websiteUrl;
+
+    const allowMarketingEmails = await collectConsent();
 
     businessInfo.legalBusinessName = legalBusinessName;
     businessInfo.tradingName = legalBusinessName;
@@ -424,7 +487,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
 
   // ── Step 2: Business structure ───────────────────────────────────────────
   if (fromStep <= 2) {
-    process.stderr.write("\nStep 2 of 4 — Business structure\n");
+    process.stderr.write("\nStep 2 of 3 — What's your business type?\n");
     // Product restricts CLI signup to Limited Company + Charity (the backend enum also has
     // SOLE_TRADER — do not re-add without product sign-off).
     const companyType = await select({
@@ -441,7 +504,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
 
   // ── Step 3: Personal details ─────────────────────────────────────────────
   if (fromStep <= 3) {
-    process.stderr.write("\nStep 3 of 4 — Personal details\n");
+    process.stderr.write("\nStep 3 of 3 — Your business contact details\n");
     const firstName = await input({
       message: "First name:",
       default: prefill.firstName,
@@ -479,53 +542,24 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     }
 
     // Business address (part of businessInfo — resend the full accumulator).
-    const addressLine1 = await input({message: "Business address:", validate: validateAddress});
+    // Postcode first, then line 1, then line 2 — the order the address is usually looked up in.
     const addressPostalCode = (
       await input({message: "Postal code:", transformer: (v) => v.toUpperCase(), validate: validatePostcode})
     ).toUpperCase();
-    businessInfo.addressLine1 = addressLine1;
+    const addressLine1 = await input({message: "Business address line 1:", validate: validateAddress});
+    const addressLine2 = (
+      await input({message: "Business address line 2 (optional):", validate: validateAddressLine2})
+    ).trim();
     businessInfo.addressPostalCode = addressPostalCode;
+    businessInfo.addressLine1 = addressLine1;
+    if (addressLine2) businessInfo.addressLine2 = addressLine2;
     await ctx.http.request({...V1_ROUTES.onboarding.updateBusiness, body: {businessInfo}});
-    process.stderr.write("✓ Personal details saved.\n");
+    process.stderr.write("✓ Business contact details saved.\n");
   }
 
-  // ── Step 4: Monthly turnover + how did you hear about us ──────────────────
-  if (fromStep <= 4 && !args.skipExtras) {
-    process.stderr.write("\nStep 4 of 4 — A bit more about your business\n");
-
-    // Average monthly transaction — selectable from the server-defined ranges.
-    const ranges = (await ctx.http.request({...V1_ROUTES.onboarding.transactionRanges})).data as string[];
-    let averageMonthlyTransaction: string | undefined;
-    if (ranges.length) {
-      averageMonthlyTransaction =
-        (await select({
-          message: "Monthly turnover:",
-          choices: [{name: "(skip)", value: ""}, ...ranges.map((r) => ({value: r, name: r}))]
-        })) || undefined;
-    }
-
-    // How did you hear about us — server-defined options (sent as the option's description).
-    const sources = (await ctx.http.request({...V1_ROUTES.onboarding.signupSources})).data as Array<{
-      id: string;
-      description: string;
-    }>;
-    let sourceOfInstall: string | undefined;
-    if (sources.length) {
-      sourceOfInstall =
-        (await select({
-          message: "How did you hear about us?",
-          choices: [{name: "(skip)", value: ""}, ...sources.map((s) => ({value: s.description, name: s.description}))]
-        })) || undefined;
-    }
-
-    if (averageMonthlyTransaction) businessInfo.averageMonthlyTransaction = averageMonthlyTransaction;
-    const extrasBody: Record<string, unknown> = {businessInfo};
-    if (sourceOfInstall) extrasBody["sourceOfInstall"] = sourceOfInstall;
-    await ctx.http.request({...V1_ROUTES.onboarding.updateBusiness, body: extrasBody});
-    process.stderr.write("✓ Onboarding complete.\n");
-  } else if (fromStep <= 4 && args.skipExtras) {
-    process.stderr.write("\n✓ Onboarding complete (optional info skipped).\n");
-  }
+  // Step 4 ("how did you hear about us" / sourceOfInstall) was removed from the flow and
+  // turnover moved up into step 1. The signupSources route record is now unused by this wizard.
+  process.stderr.write("\n✓ Onboarding complete.\n");
 
   const bizId = await getActiveBusinessId(ctx.profileName);
 

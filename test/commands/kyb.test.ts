@@ -15,6 +15,10 @@ const mock = vi.hoisted(() => {
       requests.length = 0;
       printed = undefined;
     },
+    cardActivationNotFound: false,
+    notFoundMessage: "No card application found for this business",
+    cardActivationStatusResponse: {status: "IN_REVIEW", paymentType: "ONLINE"} as Record<string, unknown>,
+    formatExplicit: true,
     buildContext: async (opts: any) => ({
       env: "sandbox",
       http: {
@@ -24,10 +28,19 @@ const mock = vi.hoisted(() => {
           if (req.path === "/api/merchant/:businessId/getKybStatus") {
             return {status: 200, data: {status: "APPROVED"}, requestId: "r"};
           }
+          if (req.path === "/api/business/:businessId/card-activation" && req.method === "GET") {
+            if (mock.cardActivationNotFound) {
+              const {AtoaError} = await import("../../src/lib/errors");
+              // Verbatim from the backend, so the discriminator is tested against reality.
+              throw new AtoaError(mock.notFoundMessage, "not_found", {status: 404});
+            }
+            return {status: 200, data: mock.cardActivationStatusResponse, requestId: "r"};
+          }
           return {status: 200, data: {}, requestId: "r"};
         }
       },
       format: "json",
+      formatExplicit: mock.formatExplicit,
       verbose: false,
       dryRun: opts.dryRun ?? false,
       yes: opts.yes ?? false,
@@ -51,10 +64,16 @@ const browserMock = vi.hoisted(() => ({
 }));
 vi.mock("../../src/lib/browser", () => ({openBrowser: browserMock.openBrowser}));
 
+// Mock @inquirer/prompts so interactive prompts never wait for real TTY input.
+vi.mock("@inquirer/prompts", () => ({
+  select: vi.fn(async ({choices}: any) => choices[0]?.value),
+  input: vi.fn(async () => "")
+}));
+
 // `kyb link` reads the active business id from the stored config (not the
 // context profile) to build the dashboard deep-link CLI-side — stub it.
 const configMock = vi.hoisted(() => ({
-  getActiveBusinessId: vi.fn(async (_profile: string) => "biz_1")
+  getActiveBusinessId: vi.fn(async (_profile: string): Promise<string | undefined> => "biz_1")
 }));
 vi.mock("../../src/lib/config-store", async () => {
   const actual = await vi.importActual<any>("../../src/lib/config-store");
@@ -63,15 +82,24 @@ vi.mock("../../src/lib/config-store", async () => {
 
 import kybStatus from "../../src/commands/kyb/status";
 import kybLink from "../../src/commands/kyb/link";
+import kybCardLink from "../../src/commands/kyb/card/link";
+import kybCardStatus from "../../src/commands/kyb/card/status";
+import * as prompts from "@inquirer/prompts";
 
 // Pin the dashboard origin so the built URL is deterministic.
 const DASHBOARD = "https://dashboard.atoa.me";
 
 beforeEach(() => {
   mock.reset();
+  mock.cardActivationNotFound = false;
+  mock.notFoundMessage = "No card application found for this business";
+  mock.cardActivationStatusResponse = {status: "IN_REVIEW", paymentType: "ONLINE"};
+  mock.formatExplicit = true;
   browserMock.openBrowser.mockClear();
   configMock.getActiveBusinessId.mockClear();
   configMock.getActiveBusinessId.mockResolvedValue("biz_1");
+  vi.mocked(prompts.select).mockClear();
+  vi.mocked(prompts.input).mockClear();
   process.env.ATOA_DASHBOARD_URL = DASHBOARD;
   process.exitCode = 0;
 });
@@ -122,14 +150,11 @@ describe("kyb link", () => {
     expect(data.url).toBe(EXPECTED_URL);
   });
 
-  it("--open calls openBrowser with the built URL", async () => {
-    await (kybLink.run as any)({args: {open: true}, rawArgs: ["--open"]});
-    expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
-  });
-
-  it("does not call openBrowser when --open is absent", async () => {
+  // Always opens — the command exists to get the merchant in front of the form, so there is
+  // no opt-out. The URL is still printed as a fallback when no browser can be launched.
+  it("always opens the browser at the built URL", async () => {
     await (kybLink.run as any)({args: {}, rawArgs: []});
-    expect(browserMock.openBrowser).not.toHaveBeenCalled();
+    expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
   });
 
   it("--dryRun does not send a request and does not open the browser", async () => {
@@ -138,5 +163,94 @@ describe("kyb link", () => {
     expect(browserMock.openBrowser).not.toHaveBeenCalled();
     const data = mock.getPrinted() as any;
     expect(data.url).toBe(EXPECTED_URL);
+  });
+});
+
+describe("kyb card link", () => {
+  // Same shape as `kyb link`, but points at /card-signup — the entry point for
+  // an already-KYB'd merchant applying for card afterwards (not /verification,
+  // which already covers card opt-in for a merchant still going through KYB).
+  const EXPECTED_URL = `${DASHBOARD}/card-signup?merchantId=biz_1`;
+
+  it("builds the card-signup URL CLI-side, after one KYB pre-check", async () => {
+    await (kybCardLink.run as any)({args: {}, rawArgs: []});
+    // The URL itself is built locally; the single request is the KYB gate, which stops the
+    // CLI opening a page /card-signup would just redirect to /home.
+    expect(mock.requests).toHaveLength(1);
+    expect(mock.requests[0].path).toBe("/api/merchant/:businessId/getKybStatus");
+    const data = mock.getPrinted() as any;
+    expect(data.url).toBe(EXPECTED_URL);
+  });
+
+  it("always opens the browser at the built URL", async () => {
+    await (kybCardLink.run as any)({args: {}, rawArgs: []});
+    expect(browserMock.openBrowser).toHaveBeenCalledWith(EXPECTED_URL);
+  });
+
+  it("errors when there is no active business", async () => {
+    configMock.getActiveBusinessId.mockResolvedValueOnce(undefined);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (kybCardLink.run as any)({args: {}, rawArgs: []});
+    expect(process.exitCode).toBe(3);
+    stderr.mockRestore();
+  });
+});
+
+describe("kyb card status", () => {
+  it("GETs /api/business/:businessId/card-activation with jwt auth", async () => {
+    await (kybCardStatus.run as any)({args: {}, rawArgs: []});
+    expect(mock.requests[0].method).toBe("GET");
+    expect(mock.requests[0].path).toBe("/api/business/:businessId/card-activation");
+    expect(mock.requests[0].auth).toBe("jwt");
+  });
+
+  // Card activation is gated on KYB, so the card status alone can't explain a merchant who
+  // can't proceed — the KYB status is fetched alongside it.
+  it("also fetches the KYB status and reports it", async () => {
+    await (kybCardStatus.run as any)({args: {}, rawArgs: []});
+    expect(mock.requests.map((r) => r.path)).toContain("/api/merchant/:businessId/getKybStatus");
+    const data = mock.getPrinted() as any;
+    expect(data).toEqual({status: "IN_REVIEW", paymentType: "ONLINE", kybStatus: "APPROVED"});
+  });
+
+  // NOT_INITIATED, not NOT_APPLIED — the spelling the platform already uses for this
+  // client-side-only state, so one condition is not reported under two names.
+  it("treats a 404 (never applied) as a NOT_INITIATED status instead of an error", async () => {
+    mock.cardActivationNotFound = true;
+    await (kybCardStatus.run as any)({args: {}, rawArgs: []});
+    expect(process.exitCode).toBe(0);
+    const data = mock.getPrinted() as any;
+    expect(data.status).toBe("NOT_INITIATED");
+  });
+
+  // Regression: this used to match ANY 404, so a stale businessId, a routing mistake or a
+  // gateway 404 all reported "you haven't applied yet" — which would tell a merchant with a
+  // pending or rejected application to re-apply.
+  it("does NOT mask an unrelated 404 as NOT_INITIATED", async () => {
+    mock.cardActivationNotFound = true;
+    mock.notFoundMessage = "Cannot GET /api/business/xyz/card-activation";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await (kybCardStatus.run as any)({args: {}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(4); // not_found, surfaced rather than swallowed
+    expect(mock.getPrinted()).toBeUndefined();
+  });
+
+  it("--dryRun does not send a request", async () => {
+    await (kybCardStatus.run as any)({args: {dryRun: true}, rawArgs: []});
+    expect(mock.requests).toHaveLength(0);
+    expect(mock.getPrinted()).toMatchObject({method: "GET", path: "/api/business/:businessId/card-activation"});
+  });
+});
+
+describe("kyb card index wiring", () => {
+  it("every subCommand thunk resolves to a defined module", async () => {
+    const mod = await import("../../src/commands/kyb/card");
+    const entries = Object.entries(mod.default.subCommands ?? {});
+    expect(entries.map(([name]) => name)).toEqual(["status", "link"]);
+    for (const [name, thunk] of entries) {
+      expect(await (thunk as () => Promise<unknown>)(), `${name} should resolve`).toBeDefined();
+    }
   });
 });

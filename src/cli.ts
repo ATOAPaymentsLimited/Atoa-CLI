@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {defineCommand, runMain} from "citty";
+import {t} from "./lib/i18n";
 import packageJson from "../package.json";
 import {assertTlsHardenedEnv} from "./lib/bootstrap";
 import {printError} from "./lib/errors";
@@ -15,7 +16,7 @@ try {
 const main = defineCommand({
   meta: {
     name: "atoa",
-    description: "Atoa payment API CLI",
+    description: t("cmdRoot"),
     version: packageJson.version
   },
   subCommands: {
@@ -39,6 +40,13 @@ const main = defineCommand({
     "payment-links": () => import("./commands/payment-links").then((m) => m.default),
     signup: () => import("./commands/signup").then((m) => m.default),
     webhooks: () => import("./commands/webhooks").then((m) => m.default),
+    addons: () => import("./commands/addons").then((m) => m.default),
+    // Group names match the product names for these features, so the same thing is called
+    // the same thing wherever a merchant meets it.
+    "custom-branding": () => import("./commands/custom-branding").then((m) => m.default),
+    "custom-sms": () => import("./commands/custom-sms").then((m) => m.default),
+    "direct-debit": () => import("./commands/direct-debit").then((m) => m.default),
+    comms: () => import("./commands/comms").then((m) => m.default),
 
     // SDK-key commands (auth via ~/atoa/auth/secret_key.json; the guard prompts for a key if missing)
     payments: () => import("./commands/payments").then((m) => m.default),

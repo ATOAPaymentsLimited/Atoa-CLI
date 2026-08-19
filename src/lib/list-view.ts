@@ -1,9 +1,12 @@
 import type {CommandContext} from "./context";
 import type {HttpMethod, AuthMode} from "./http";
 import {stripControlChars} from "./output";
+import {t} from "./i18n";
 
 /** Minimal route shape (matches V1_ROUTES entries: {method, path, auth}). */
 type Route = {method: HttpMethod; path: string; auth: AuthMode};
+
+export const DEFAULT_PAGE_SIZE = 50;
 
 /**
  * Fetches every page of a list endpoint and returns a flat array of rows.
@@ -14,12 +17,12 @@ type Route = {method: HttpMethod; path: string; auth: AuthMode};
 export async function fetchAllPages(
   ctx: CommandContext,
   route: Route,
-  baseQuery: Record<string, string> = {}
+  baseQuery: Record<string, string> = {},
+  size: number = DEFAULT_PAGE_SIZE
 ): Promise<unknown[]> {
-  const SIZE = 50;
   const all: unknown[] = [];
   for (let page = 0; page < 1000; page++) {
-    const {data} = await ctx.http.request({...route, query: {...baseQuery, page: String(page), size: String(SIZE)}});
+    const {data} = await ctx.http.request({...route, query: {...baseQuery, page: String(page), size: String(size)}});
     if (Array.isArray(data)) return data; // endpoint isn't paginated — already the full list
     const env = (data ?? {}) as {data?: unknown[]; totalCount?: number};
     const rows = Array.isArray(env.data) ? env.data : [];
@@ -47,7 +50,7 @@ export async function presentList(
     return;
   }
   if (rows.length === 0) {
-    process.stderr.write(`${opts.title ?? "Results"}: none\n`);
+    process.stderr.write(t("listNoResults", {title: opts.title ?? t("titleResults")}));
     return;
   }
 
@@ -59,7 +62,7 @@ export async function presentList(
     let idx: number;
     try {
       idx = await select<number>({
-        message: `${opts.title ?? "Results"} · ${rows.length} total`,
+        message: t("listTotal", {title: opts.title ?? t("titleResults"), count: rows.length}),
         pageSize: 12,
         loop: false,
         choices: [

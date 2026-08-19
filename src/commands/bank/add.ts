@@ -4,6 +4,8 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import type {CommandContext} from "../../lib/context";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
+import {BackendErrorCode} from "../../lib/enums";
+import {t} from "../../lib/i18n";
 import {isInteractive, renderKeyValues} from "../../lib/output";
 import {withOtp} from "../../lib/otp";
 
@@ -17,7 +19,7 @@ type BankAddArgs = CommonOptions & {
   setPrimary?: boolean;
 };
 
-/** Subset of the /api/institutions response we use (the dashboard's BankSelect list). */
+/** Subset of the /api/institutions response we use. */
 interface BankInstitution {
   id: string;
   name?: string;
@@ -30,28 +32,24 @@ interface BankInstitution {
 export default defineCommand({
   meta: {
     name: "add",
-    description: "Add a bank account. Pick the bank + enter details interactively, then verify via OTP before adding."
+    description: t("cmdBankAdd")
   },
   // Flags are optional: omitted fields are prompted for in a terminal. Pass them to script the
   // command in a non-interactive shell (the OTP step still needs a TTY).
   args: withCommonArgs({
-    bankName: {type: "string", description: "bank name (otherwise picked from the institutions list)"},
-    sortCode: {type: "string", description: "6-digit sort code (prompted if omitted)"},
-    accountNumber: {type: "string", description: "account number (prompted if omitted)"},
-    accountHolderName: {type: "string", description: "name on the account (prompted if omitted)"},
-    nickName: {type: "string", description: "a label for this account (optional)"},
-    currency: {type: "string", description: "ISO currency (default GBP)"},
-    setPrimary: {type: "boolean", description: "set as the primary account"}
+    bankName: {type: "string", description: t("argBankName")},
+    sortCode: {type: "string", description: t("argSortCodePrompted")},
+    accountNumber: {type: "string", description: t("argAccountNumberPrompted")},
+    accountHolderName: {type: "string", description: t("argAccountHolderNamePrompted")},
+    nickName: {type: "string", description: t("argNickName")},
+    currency: {type: "string", description: t("argCurrency")},
+    setPrimary: {type: "boolean", description: t("argSetPrimary")}
   }),
   run: runWithContext<BankAddArgs>(async (ctx, args) => {
     const tty = Boolean(process.stdin.isTTY);
 
     if (!tty && (!args.bankName || !args.sortCode || !args.accountNumber)) {
-      throw new AtoaError(
-        "bank add is interactive (it prompts for details + an OTP). In a non-interactive shell pass " +
-          "--bank-name, --sort-code and --account-number.",
-        "validation"
-      );
+      throw new AtoaError(t("bankAddInteractiveOnly"), "validation");
     }
 
     const body = await collectAccountFields(ctx, args, tty);
@@ -67,21 +65,21 @@ export default defineCommand({
     const {data, otpUsed} = await withOtp(ctx.http, {
       send: V1_ROUTES.bank.add,
       body,
-      onOtpSent: () => process.stderr.write("An OTP has been sent to your registered contact. Enter it below.\n"),
+      onOtpSent: () => process.stderr.write(t("otpSentToContact")),
       resolveRetry: async (err) => {
-        if (err.errorCode !== "COP_VERIFIED_WITH_FUZZY_MATCH") return null;
-        const registered = (err.additionalData?.["fuzzyName"] as string) || "the name your bank holds";
+        if (err.errorCode !== BackendErrorCode.COP_VERIFIED_WITH_FUZZY_MATCH) return null;
+        const registered = (err.additionalData?.["fuzzyName"] as string) || t("theNameYourBankHolds");
         const entered =
           (err.additionalData?.["registeredName"] as string) || (body["accountHolderName"] as string) || "";
-        if (entered) process.stderr.write(`The name on the account differs from what you entered ("${entered}").\n`);
+        if (entered) process.stderr.write(t("accountNameDiffers", {entered}));
         const ok = await confirm({
-          message: `Your bank's records show "${registered}". Use that name and continue?`,
+          message: t("useBankRegisteredName", {registered}),
           default: false
         });
         return ok ? {confirmFuzzyCheck: true} : null;
       }
     });
-    if (otpUsed) process.stderr.write("✓ OTP verified.\n");
+    if (otpUsed) process.stderr.write(t("otpVerified"));
 
     if (!isInteractive(ctx.formatExplicit)) {
       ctx.print(data);
@@ -91,21 +89,21 @@ export default defineCommand({
     const acct = (data ?? {}) as Record<string, unknown>;
     const str = (v: unknown): string | undefined => (v === null || v === undefined || v === "" ? undefined : String(v));
     process.stdout.write(
-      renderKeyValues("✓ Bank account added", [
-        ["Bank", str(acct.bankName)],
-        ["Account", str(acct.maskedAccountNumber)],
-        ["Sort code", str(acct.sortCode)],
-        ["Nickname", str(acct.nickName)],
-        ["CoP check", str(acct.copVerified)],
-        ["ID", str(acct.id)]
+      renderKeyValues(t("titleBankAccountAdded"), [
+        [t("labelBank"), str(acct.bankName)],
+        [t("labelAccount"), str(acct.maskedAccountNumber)],
+        [t("labelSortCode"), str(acct.sortCode)],
+        [t("labelNickname"), str(acct.nickName)],
+        [t("labelCopCheck"), str(acct.copVerified)],
+        [t("labelId"), str(acct.id)]
       ]) + "\n"
     );
   })
 });
 
 /**
- * Resolves the bank: `--bank-name` wins; otherwise fetch the supported institutions
- * (the dashboard's BankSelect list) and let the user pick. Returns the name + code to send.
+ * Resolves the bank: `--bank-name` wins; otherwise fetch the supported institutions and let
+ * the user pick. Returns the name + code to send.
  */
 async function pickBank(
   ctx: CommandContext,
@@ -125,7 +123,7 @@ async function pickBank(
 
   if (tty && banks.length) {
     const chosen = await select<BankInstitution>({
-      message: "Bank:",
+      message: t("labelBank"),
       pageSize: 12,
       choices: banks.map((b) => ({name: b.fullName || b.name || b.bankName || b.id, value: b}))
     });
@@ -139,8 +137,8 @@ async function pickBank(
     };
   }
 
-  const typed = (tty ? await input({message: "Bank name:"}) : "").trim();
-  if (!typed) throw new AtoaError("Bank name is required", "validation");
+  const typed = (tty ? await input({message: t("labelBankName")}) : "").trim();
+  if (!typed) throw new AtoaError(t("bankNameRequired"), "validation");
   return {bankName: typed};
 }
 
@@ -152,18 +150,18 @@ async function collectAccountFields(
 ): Promise<Record<string, unknown>> {
   const required = async (flag: string | undefined, message: string, label: string): Promise<string> => {
     const value = (flag ?? (tty ? await input({message}) : "")).trim();
-    if (!value) throw new AtoaError(`${label} is required`, "validation");
+    if (!value) throw new AtoaError(t("fieldRequired", {field: label}), "validation");
     return value;
   };
 
   const {bankName, bankCode} = await pickBank(ctx, args, tty);
-  const sortCode = (await required(args.sortCode, "Sort code (6 digits, no spaces):", "Sort code")).replace(/\s+/g, "");
-  const accountNumber = await required(args.accountNumber, "Account number (usually 8 digits):", "Account number");
+  const sortCode = (await required(args.sortCode, t("promptSortCode"), t("labelSortCode"))).replace(/\s+/g, "");
+  const accountNumber = await required(args.accountNumber, t("promptAccountNumber"), t("labelAccountNumber"));
 
-  // Confirm the account number on interactive entry (matches the dashboard's add form).
+  // Confirm the account number on interactive entry — a typo guard.
   if (tty && !args.accountNumber) {
-    const reEntered = (await input({message: "Re-enter account number to confirm:"})).trim();
-    if (reEntered !== accountNumber) throw new AtoaError("Account numbers do not match.", "validation");
+    const reEntered = (await input({message: t("reEnterAccountNumber")})).trim();
+    if (reEntered !== accountNumber) throw new AtoaError(t("accountNumbersDoNotMatch"), "validation");
   }
 
   // Account holder name prefills from the signed-in user's profile name — press Enter to accept.
@@ -172,7 +170,7 @@ async function collectAccountFields(
     (tty
       ? (
           await input({
-            message: "Account holder name (the name as it appears on the bank account):",
+            message: t("labelAccountHolderName"),
             default: await defaultHolderName(ctx)
           })
         ).trim()
@@ -180,8 +178,7 @@ async function collectAccountFields(
     undefined;
 
   const setAsPrimary =
-    args.setPrimary ??
-    (tty ? await confirm({message: "Set as your primary (default) account?", default: false}) : false);
+    args.setPrimary ?? (tty ? await confirm({message: t("setAsPrimaryAccount"), default: false}) : false);
 
   // Currency is always GBP and nickname isn't prompted; both stay overridable via flags for scripting.
   const currency = (args.currency || "GBP").toUpperCase();
