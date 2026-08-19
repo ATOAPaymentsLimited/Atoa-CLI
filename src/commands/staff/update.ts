@@ -66,20 +66,20 @@ function hasChanges(next: NextStaff, current: CurrentStaff): boolean {
 }
 
 export default defineCommand({
-  meta: {name: "update", description: "Update a staff member's details, role and permitted stores"},
+  meta: {name: "update", description: t("cmdStaffUpdate")},
   args: withCommonArgs({
     userId: {
       type: "positional",
       required: false,
-      description: "user ID of the staff member (omit to pick from the staff list on a TTY)"
+      description: t("argStaffUserId")
     },
-    firstName: {type: "string", description: "first name"},
-    lastName: {type: "string", description: "last name"},
-    email: {type: "string", description: "email address"},
-    phoneCountryCode: {type: "string", description: "phone country code, e.g. 44 (required with --phone)"},
-    phone: {type: "string", description: "phone number without country code"},
-    role: {type: "string", description: "role ID (from `atoa roles list`)"},
-    store: {type: "string", description: "permitted store ID (repeatable; replaces the current set)"}
+    firstName: {type: "string", description: t("argFirstName")},
+    lastName: {type: "string", description: t("argLastName")},
+    email: {type: "string", description: t("argEmailAddress")},
+    phoneCountryCode: {type: "string", description: t("argPhoneCountryCode")},
+    phone: {type: "string", description: t("argPhone")},
+    role: {type: "string", description: t("argRoleId")},
+    store: {type: "string", description: t("argPermittedStoreIdReplaces")}
   }),
   run: runWithContext<StaffUpdateArgs>(async (ctx, args, rawArgs) => {
     const interactive = isInteractive(ctx.formatExplicit);

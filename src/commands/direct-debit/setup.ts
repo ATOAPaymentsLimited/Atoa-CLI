@@ -50,17 +50,17 @@ const FIELDS: FieldSpec[] = [
 export default defineCommand({
   meta: {
     name: "setup",
-    description: "Set up the direct-debit mandate for platform fees (bank + billing details, then confirm the mandate)"
+    description: t("cmdDirectDebitSetup")
   },
   args: withCommonArgs({
-    accountNumber: {type: "string", description: "8-digit UK account number"},
-    sortCode: {type: "string", description: "6-digit UK sort code"},
-    name: {type: "string", description: "name on account (max 20 characters)"},
-    email: {type: "string", description: "billing email"},
-    addressLine1: {type: "string", description: "billing address line 1"},
-    addressLine2: {type: "string", description: "billing address line 2"},
-    city: {type: "string", description: "billing town/city"},
-    postalCode: {type: "string", description: "billing postal code"}
+    accountNumber: {type: "string", description: t("argDdAccountNumber")},
+    sortCode: {type: "string", description: t("argDdSortCode")},
+    name: {type: "string", description: t("argDdNameOnAccount")},
+    email: {type: "string", description: t("argDdEmail")},
+    addressLine1: {type: "string", description: t("argDdAddressLine1")},
+    addressLine2: {type: "string", description: t("argDdAddressLine2")},
+    city: {type: "string", description: t("argDdCity")},
+    postalCode: {type: "string", description: t("argDdPostalCode")}
   }),
   run: runWithContext<DirectDebitSetupArgs>(async (ctx, args) => {
     const interactive = isInteractive(ctx.formatExplicit);

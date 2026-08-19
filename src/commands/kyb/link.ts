@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {openBrowser} from "../../lib/browser";
 import {resolveDashboardUrl} from "../../lib/env";
@@ -21,7 +22,7 @@ function buildKybUrl(businessId: string): string {
 }
 
 export default defineCommand({
-  meta: {name: "link", description: "Open KYB verification in the browser"},
+  meta: {name: "link", description: t("cmdKybLink")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     const businessId = await getActiveBusinessId(ctx.profileName);
@@ -44,7 +45,7 @@ export default defineCommand({
     // so there is something to fall back on when no browser can be launched.
     const opened = await openBrowser(url);
     if (!opened) {
-      process.stderr.write("Could not open a browser automatically — open the URL below manually.\n");
+      process.stderr.write(t("couldNotOpenBrowser"));
     }
 
     ctx.print({url});

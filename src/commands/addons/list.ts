@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive, renderKeyValues} from "../../lib/output";
@@ -11,7 +12,7 @@ import {
 } from "./_shared";
 
 export default defineCommand({
-  meta: {name: "list", description: "Show the current addon plan, subscribable plans and feature usage"},
+  meta: {name: "list", description: t("cmdAddonsList")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     if (ctx.dryRun) {

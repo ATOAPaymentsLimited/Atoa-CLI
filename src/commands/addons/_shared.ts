@@ -1,6 +1,7 @@
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
 import {AddonFeatureType} from "../../lib/enums";
+import {t} from "../../lib/i18n";
 import type {CommandContext} from "../../lib/context";
 
 /** One row of `GET merchant/addonPlan/:businessId/featureUsage`. */
@@ -127,32 +128,26 @@ export async function resolveTargetPlan(
   opts: {interactive: boolean; verb: string}
 ): Promise<AddonPlan> {
   if (candidates.length === 0) {
-    throw new AtoaError(`No plans available to ${opts.verb} to from your current plan.`, "validation");
+    throw new AtoaError(t("noPlansAvailable", {verb: opts.verb}), "validation");
   }
 
   if (explicitId) {
     const found = candidates.find((p) => p.id === explicitId);
     if (!found) {
-      throw new AtoaError(
-        `Plan "${explicitId}" is not available to ${opts.verb} to. Options: ${candidates
-          .map((p) => `${p.name} (${p.id})`)
-          .join(", ")}`,
-        "validation"
-      );
+      const options = candidates.map((p) => `${p.name} (${p.id})`).join(", ");
+      throw new AtoaError(t("planNotAvailable", {plan: explicitId, verb: opts.verb, options}), "validation");
     }
     return found;
   }
 
   if (!opts.interactive) {
-    throw new AtoaError(
-      `a plan id is required (non-interactive). Available: ${candidates.map((p) => `${p.name}=${p.id}`).join(", ")}`,
-      "validation"
-    );
+    const available = candidates.map((p) => `${p.name}=${p.id}`).join(", ");
+    throw new AtoaError(t("planIdRequiredNonInteractive", {available}), "validation");
   }
 
   const {select} = await import("@inquirer/prompts");
   const id = await select({
-    message: `Select the plan to ${opts.verb} to:`,
+    message: t("selectPlanToChangeTo", {verb: opts.verb}),
     choices: candidates.map((p) => ({value: p.id, name: formatPlanChoice(p)}))
   });
   return candidates.find((p) => p.id === id) as AddonPlan;

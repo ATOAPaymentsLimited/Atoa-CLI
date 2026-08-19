@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
@@ -8,9 +9,9 @@ import {fetchCustomSenderName} from "./_shared";
 type SmsNameSetArgs = CommonOptions & {name: string};
 
 export default defineCommand({
-  meta: {name: "set", description: "Set (or rename) the custom SMS sender name for this business"},
+  meta: {name: "set", description: t("cmdCustomSmsSet")},
   args: withCommonArgs({
-    name: {type: "positional", required: true, description: "custom SMS sender name"}
+    name: {type: "positional", required: true, description: t("argCustomSmsName")}
   }),
   run: runWithContext<SmsNameSetArgs>(async (ctx, args) => {
     const customSmsName = args.name?.trim() ?? "";

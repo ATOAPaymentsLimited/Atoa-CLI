@@ -1,11 +1,12 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {formatTopic, type TopicRow} from "./_shared";
 
 export default defineCommand({
-  meta: {name: "list", description: "List notification topics and their channel preferences"},
+  meta: {name: "list", description: t("cmdCommsList")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     if (ctx.dryRun) {

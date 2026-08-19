@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../../_common";
 import {openBrowser} from "../../../lib/browser";
 import {resolveDashboardUrl} from "../../../lib/env";
@@ -22,7 +23,7 @@ function buildCardSignupUrl(businessId: string): string {
 }
 
 export default defineCommand({
-  meta: {name: "link", description: "Open card signup in the browser for an already-KYB'd merchant"},
+  meta: {name: "link", description: t("cmdKybCardLink")},
   args: withCommonArgs({}),
   run: runWithContext<CommonOptions>(async (ctx) => {
     const businessId = await getActiveBusinessId(ctx.profileName);
@@ -46,7 +47,7 @@ export default defineCommand({
 
     const opened = await openBrowser(url);
     if (!opened) {
-      process.stderr.write("Could not open a browser automatically — open the URL below manually.\n");
+      process.stderr.write(t("couldNotOpenBrowser"));
     }
 
     ctx.print({url});

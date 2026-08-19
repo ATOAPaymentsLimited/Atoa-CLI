@@ -1,4 +1,5 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
@@ -8,15 +9,14 @@ type BrandingSetArgs = CommonOptions & {colorCode: string};
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 export default defineCommand({
-  meta: {name: "set", description: "Set the checkout page theme colour"},
+  meta: {name: "set", description: t("cmdCustomBrandingSet")},
   args: withCommonArgs({
-    colorCode: {type: "positional", required: true, description: "hex colour code, e.g. #FF0000"}
+    colorCode: {type: "positional", required: true, description: t("argColorCode")}
   }),
   run: runWithContext<BrandingSetArgs>(async (ctx, args) => {
     const colorCode = args.colorCode?.trim();
-    if (!colorCode) throw new AtoaError("colorCode is required", "validation");
-    if (!HEX_COLOR.test(colorCode))
-      throw new AtoaError("colorCode must be a 6-digit hex colour, e.g. #FF0000", "validation");
+    if (!colorCode) throw new AtoaError(t("colorCodeRequired"), "validation");
+    if (!HEX_COLOR.test(colorCode)) throw new AtoaError(t("colorCodeInvalid"), "validation");
 
     const body = {theme: {colorCode}};
 

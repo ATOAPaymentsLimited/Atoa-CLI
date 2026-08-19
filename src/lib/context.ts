@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function */
 import {parseEnvFlag, resolveBaseUrl, type Env} from "./env";
 import {buildAuthHeader, fingerprintToken} from "./auth";
 import {latestSdkSecret} from "./sdk-key-file";
@@ -16,6 +17,7 @@ import {V1_ROUTES} from "./v1-routes";
 import {buildHttpClient, assertTlsHardenedEnv, type HttpClient} from "./http";
 import {resolveFormat, print, type OutputFormat} from "./output";
 import {AtoaError} from "./errors";
+import {t} from "./i18n";
 
 export type {Env, OutputFormat, HttpClient};
 
@@ -55,7 +57,7 @@ export async function buildContext(
 
   const resolved = await resolveActiveProfile(opts.profile);
   if (resolved.kind === "none") {
-    throw new AtoaError("No profile is configured. Run `atoa login` to pair this device.", "auth");
+    throw new AtoaError(t("noProfileConfigured"), "auth");
   }
   if (resolved.kind === "ambiguous") {
     throw new AtoaError(

@@ -4,13 +4,14 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
 import {fetchCurrentPlan, fetchAvailablePlans, partitionByDirection, resolveTargetPlan} from "./_shared";
+import {t} from "../../lib/i18n";
 
 type UpgradeArgs = CommonOptions & {planId?: string};
 
 export default defineCommand({
-  meta: {name: "upgrade", description: "Move this business to a higher addon plan (changes billing)"},
+  meta: {name: "upgrade", description: t("cmdAddonsUpgrade")},
   args: withCommonArgs({
-    planId: {type: "positional", required: false, description: "target plan ID (omit to pick from a list on a TTY)"}
+    planId: {type: "positional", required: false, description: t("argPlanId")}
   }),
   run: runWithContext<UpgradeArgs>(async (ctx, args) => {
     const [current, available] = await Promise.all([fetchCurrentPlan(ctx), fetchAvailablePlans(ctx)]);
@@ -36,15 +37,19 @@ export default defineCommand({
     // Billing change — always confirm unless explicitly waived.
     if (!ctx.yes) {
       if (!isInteractive(ctx.formatExplicit)) {
-        throw new AtoaError("pass --yes to change the plan without a confirmation prompt", "validation");
+        throw new AtoaError(t("passYesToChangePlan"), "validation");
       }
       const {confirm} = await import("@inquirer/prompts");
       const ok = await confirm({
-        message: `Upgrade from ${current.addonPlan?.name ?? "current plan"} to ${target.name} (£${target.monthlyAmount}/mo)?`,
+        message: t("upgradeConfirm", {
+          from: current.addonPlan?.name ?? t("currentPlan"),
+          to: target.name,
+          amount: target.monthlyAmount ?? ""
+        }),
         default: false
       });
       if (!ok) {
-        process.stdout.write("Aborted.\n");
+        process.stdout.write(t("aborted"));
         return;
       }
     }

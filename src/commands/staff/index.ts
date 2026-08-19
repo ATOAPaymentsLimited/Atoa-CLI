@@ -1,7 +1,8 @@
 import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
 
 export default defineCommand({
-  meta: {name: "staff", description: "Staff / business-user management"},
+  meta: {name: "staff", description: t("cmdStaff")},
   subCommands: {
     list: () => import("./list").then((m) => m.default),
     invite: () => import("./invite").then((m) => m.default),

@@ -30,14 +30,14 @@ interface StoreFields {
 }
 
 export default defineCommand({
-  meta: {name: "update", description: "Update an existing merchant store"},
+  meta: {name: "update", description: t("cmdStoresUpdate")},
   args: withCommonArgs({
-    storeId: {type: "positional", required: false, description: "store ID (omit to pick from the store list on a TTY)"},
-    locationName: {type: "string", description: "store name"},
-    addressLine1: {type: "string", description: "address line 1"},
-    addressLine2: {type: "string", description: "address line 2"},
-    addressPostalCode: {type: "string", description: "postal code"},
-    cityOrTown: {type: "string", description: "city or town"}
+    storeId: {type: "positional", required: false, description: t("argStoreId")},
+    locationName: {type: "string", description: t("argStoreName")},
+    addressLine1: {type: "string", description: t("argAddressLine1")},
+    addressLine2: {type: "string", description: t("argAddressLine2")},
+    addressPostalCode: {type: "string", description: t("argPostalCode")},
+    cityOrTown: {type: "string", description: t("argCityOrTown")}
   }),
   run: runWithContext<StoresUpdateArgs>(async (ctx, args) => {
     const interactive = isInteractive(ctx.formatExplicit);
