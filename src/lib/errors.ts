@@ -1,3 +1,5 @@
+import {t} from "./i18n";
+
 export type AtoaErrorKind =
   | "auth" // exit 2 — HTTP 401
   | "forbidden" // exit 2 — HTTP 403
@@ -119,9 +121,7 @@ function hintFor(err: AtoaError, authMode: "jwt" | "sdk"): string | undefined {
   if (err.kind === "auth" || err.kind === "forbidden") {
     // SDK-key commands authenticate with an API key, not a browser login — so don't
     // tell the user to `atoa login` there; point them at the key instead.
-    return authMode === "sdk"
-      ? "your Atoa API key may be invalid or revoked — run 'atoa keys create' to set a new one"
-      : "run 'atoa login' to (re-)authenticate";
+    return authMode === "sdk" ? t("hintSdkKeyInvalid") : t("hintReauthenticate");
   }
   return undefined;
 }

@@ -21,7 +21,7 @@ export default defineCommand({
     if (verdict !== true) throw new AtoaError(verdict, "validation");
 
     if (ctx.dryRun) {
-      ctx.print({note: "checks for an existing sender name first, then creates or updates", customSmsName});
+      ctx.print({note: t("customSmsSetDryRunNote"), customSmsName});
       return;
     }
 

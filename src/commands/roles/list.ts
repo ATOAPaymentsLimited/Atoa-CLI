@@ -18,7 +18,7 @@ export default defineCommand({
     // display so the drill-in shows permission names rather than the nested catalogue records.
     const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)).map((r) => projectRole(r as never));
     await presentList(ctx, rows, {
-      title: "Roles",
+      title: t("titleRoles"),
       line: (r) => [r["name"], r["roleScopeType"], r["description"]].filter(Boolean).join("  ·  ")
     });
   })

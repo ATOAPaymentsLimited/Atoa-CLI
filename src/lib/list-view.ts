@@ -1,6 +1,7 @@
 import type {CommandContext} from "./context";
 import type {HttpMethod, AuthMode} from "./http";
 import {stripControlChars} from "./output";
+import {t} from "./i18n";
 
 /** Minimal route shape (matches V1_ROUTES entries: {method, path, auth}). */
 type Route = {method: HttpMethod; path: string; auth: AuthMode};
@@ -49,7 +50,7 @@ export async function presentList(
     return;
   }
   if (rows.length === 0) {
-    process.stderr.write(`${opts.title ?? "Results"}: none\n`);
+    process.stderr.write(t("listNoResults", {title: opts.title ?? t("titleResults")}));
     return;
   }
 
@@ -61,7 +62,7 @@ export async function presentList(
     let idx: number;
     try {
       idx = await select<number>({
-        message: `${opts.title ?? "Results"} · ${rows.length} total`,
+        message: t("listTotal", {title: opts.title ?? t("titleResults"), count: rows.length}),
         pageSize: 12,
         loop: false,
         choices: [

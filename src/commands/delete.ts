@@ -1,16 +1,18 @@
 import {defineCommand} from "citty";
 import {t} from "../lib/i18n";
 import {confirm} from "@inquirer/prompts";
-import {withCommonArgs, runWithContext, type CommonOptions} from "./_common";
+import {withCommonArgs, runWithSdkKey, type CommonOptions} from "./_common";
 
 type DeleteArgs = CommonOptions & {path?: string};
 
 export default defineCommand({
   meta: {name: "delete", description: t("cmdDelete")},
   args: withCommonArgs({
-    path: {type: "positional", required: true, description: "/api/path/:param"}
+    path: {type: "positional", required: true, description: t("argApiPath")}
   }),
-  run: runWithContext<DeleteArgs>(async (ctx, args) => {
+  // SDK-key authenticated, like the other raw-request commands: these are for poking the API
+  // with a minted key, not for driving the browser-login session.
+  run: runWithSdkKey<DeleteArgs>(async (ctx, args) => {
     const path = args.path as string;
 
     if (ctx.dryRun) {

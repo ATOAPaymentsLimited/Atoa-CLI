@@ -22,7 +22,7 @@ export default defineCommand({
       projectStore(r as never)
     );
     await presentList(ctx, rows, {
-      title: "Stores",
+      title: t("titleStores"),
       line: (s) =>
         [s["locationName"] || "(unnamed)", s["addressPostalCode"], s["cityOrTown"]].filter(Boolean).join("  ·  ")
     });
