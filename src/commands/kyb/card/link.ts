@@ -28,10 +28,7 @@ export default defineCommand({
   run: runWithContext<CommonOptions>(async (ctx) => {
     const businessId = await getActiveBusinessId(ctx.profileName);
     if (!businessId) {
-      throw new AtoaError(
-        `no active business for profile "${ctx.profileName}". Re-pair via \`atoa login\`.`,
-        "validation"
-      );
+      throw new AtoaError(t("noActiveBusinessForProfile", {name: ctx.profileName}), "validation");
     }
 
     const url = buildCardSignupUrl(businessId);

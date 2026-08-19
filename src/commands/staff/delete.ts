@@ -35,7 +35,7 @@ export default defineCommand({
         throw new AtoaError(t("passYesToRemove"), "validation");
       }
       const {confirm} = await import("@inquirer/prompts");
-      const ok = await confirm({message: `Remove ${display ?? userId} from this business?`, default: false});
+      const ok = await confirm({message: t("confirmRemoveStaff", {name: display ?? userId}), default: false});
       if (!ok) return;
     }
 

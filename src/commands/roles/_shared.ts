@@ -83,12 +83,12 @@ export async function pickPermissionIds(ctx: CommandContext, preselected: string
   const {checkbox, Separator} = await import("@inquirer/prompts");
   const choices: Array<InstanceType<typeof Separator> | {name: string; value: string; checked?: boolean}> = [];
   for (const category of categories) {
-    choices.push(new Separator(`— ${category.name ?? t("categoryOther")} —`));
+    choices.push(new Separator(t("categorySeparator", {name: category.name ?? t("categoryOther")})));
     for (const perm of category.permissions ?? []) {
       if (!perm.id) continue;
-      const requires = perm.dependsOnIds?.length ? `  ${t("permissionPullsInPrerequisites")}` : "";
+      const requires = perm.dependsOnIds?.length ? t("permissionPullsInPrerequisites") : "";
       choices.push({
-        name: `${perm.name ?? perm.id}${requires}`,
+        name: t("permissionChoice", {name: perm.name ?? perm.id, requires}),
         value: perm.id,
         checked: preselected.includes(perm.id)
       });
@@ -100,7 +100,7 @@ export async function pickPermissionIds(ctx: CommandContext, preselected: string
 
 function announce({ids, added}: {ids: string[]; added: string[]}): string[] {
   if (added.length > 0) {
-    process.stderr.write(`${t("permissionsAlsoGranted")} ${added.join(", ")}\n`);
+    process.stderr.write(t("permissionsAlsoGranted", {permissions: added.join(", ")}));
   }
   return ids;
 }
@@ -136,7 +136,7 @@ export function projectRole(row: RoleRow): Record<string, unknown> {
 /** CUSTOM_ROLES addon-limit hit — adds the plan-limit hint to the backend's own message. */
 export function withUpgradeHint(err: unknown): unknown {
   if (err instanceof AtoaError && err.errorCode === BackendErrorCode.ADDON_UPGRADE_REQUIRED) {
-    return new AtoaError(`${err.message} — ${t("customRolesUpgradeHint")}`, err.kind, {
+    return new AtoaError(t("customRolesUpgradeError", {message: err.message}), err.kind, {
       status: err.status,
       errorCode: err.errorCode,
       requestId: err.requestId,

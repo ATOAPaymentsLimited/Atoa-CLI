@@ -88,12 +88,16 @@ export function downgradeBlockers(usage: FeatureUsage[], target: AddonPlan): str
     if (!feature) {
       // One bank account is always permitted, even on plans without the feature.
       if (featureType === AddonFeatureType.MULTI_BANK_ACCOUNT && used === 1) continue;
-      if (used > 0) blockers.push(`${featureType}: in use (${used}) but not included in ${target.name}`);
+      if (used > 0) {
+        blockers.push(t("downgradeBlockerNotIncluded", {feature: featureType, used, plan: target.name}));
+      }
       continue;
     }
 
     if (feature.limit && used > feature.limit && feature.overlimitCharges <= 0) {
-      blockers.push(`${featureType}: ${used} in use, ${target.name} allows ${feature.limit}`);
+      blockers.push(
+        t("downgradeBlockerOverLimit", {feature: featureType, used, plan: target.name, limit: feature.limit})
+      );
     }
   }
 
@@ -113,8 +117,8 @@ export function partitionByDirection(
 }
 
 export function formatPlanChoice(p: AddonPlan): string {
-  const price = p.monthlyAmount != null ? `£${p.monthlyAmount}/mo` : t("priceUnavailable");
-  return `${p.name} — ${price}`;
+  const price = p.monthlyAmount != null ? t("planPriceMonthly", {amount: p.monthlyAmount}) : t("priceUnavailable");
+  return t("planChoice", {name: p.name, price});
 }
 
 /**
@@ -134,14 +138,14 @@ export async function resolveTargetPlan(
   if (explicitId) {
     const found = candidates.find((p) => p.id === explicitId);
     if (!found) {
-      const options = candidates.map((p) => `${p.name} (${p.id})`).join(", ");
+      const options = candidates.map((p) => t("planNameWithId", {name: p.name, id: p.id})).join(", ");
       throw new AtoaError(t("planNotAvailable", {plan: explicitId, verb: opts.verb, options}), "validation");
     }
     return found;
   }
 
   if (!opts.interactive) {
-    const available = candidates.map((p) => `${p.name}=${p.id}`).join(", ");
+    const available = candidates.map((p) => t("planNameEqId", {name: p.name, id: p.id})).join(", ");
     throw new AtoaError(t("planIdRequiredNonInteractive", {available}), "validation");
   }
 

@@ -87,7 +87,7 @@ export async function fetchPrefillSources(ctx: CommandContext): Promise<PrefillS
     // Enabled accounts first so the default selection is a usable one.
     accounts: [...all.filter((a) => a?.enabled !== false), ...all.filter((a) => a?.enabled === false)],
     // Only offer a name when both halves are present, rather than a half-complete "Jane undefined".
-    name: firstName && lastName ? `${firstName} ${lastName}` : undefined,
+    name: firstName && lastName ? t("fullName", {firstName, lastName}) : undefined,
     email: user?.email,
     addressLine1: info?.addressLine1,
     addressLine2: info?.addressLine2,

@@ -8,8 +8,12 @@ import {
   fetchAvailablePlans,
   fetchFeatureUsage,
   partitionByDirection,
-  formatPlanChoice
+  formatPlanChoice,
+  type AddonPlan
 } from "./_shared";
+
+const planList = (plans: AddonPlan[]): string =>
+  plans.map((p) => t("planListItem", {plan: formatPlanChoice(p)})).join("");
 
 export default defineCommand({
   meta: {name: "list", description: t("cmdAddonsList")},
@@ -56,28 +60,29 @@ export default defineCommand({
       return;
     }
 
+    const monthly = current.addonPlan?.monthlyAmount;
     const rows: Array<[string, string | undefined]> = [
-      ["Plan", current.addonPlan?.name],
-      ["Price", current.addonPlan?.monthlyAmount != null ? `£${current.addonPlan.monthlyAmount}/mo` : undefined],
-      ["Renewal", current.renewalType],
-      ["Started", current.startDate],
-      ["Ends", current.endDate]
+      [t("labelPlan"), current.addonPlan?.name],
+      [t("labelPrice"), monthly != null ? t("planPriceMonthly", {amount: monthly}) : undefined],
+      [t("labelRenewal"), current.renewalType],
+      [t("labelStarted"), current.startDate],
+      [t("labelEnds"), current.endDate]
     ];
-    process.stdout.write(renderKeyValues("Addon plan", rows) + "\n\n");
+    process.stdout.write(renderKeyValues(t("titleAddonPlan"), rows) + "\n\n");
 
     if (usage.length) {
       process.stdout.write(
         renderKeyValues(
-          "Feature usage",
+          t("titleFeatureUsage"),
           usage.map((u) => [u.featureType, String(u.usage)] as [string, string])
         ) + "\n\n"
       );
     }
     if (upgrades.length) {
-      process.stdout.write(`Upgrade to:\n${upgrades.map((p) => `  ${formatPlanChoice(p)}`).join("\n")}\n\n`);
+      process.stdout.write(t("headingUpgradeTo") + planList(upgrades) + "\n");
     }
     if (downgrades.length) {
-      process.stdout.write(`Downgrade to:\n${downgrades.map((p) => `  ${formatPlanChoice(p)}`).join("\n")}\n`);
+      process.stdout.write(t("headingDowngradeTo") + planList(downgrades));
     }
   })
 });

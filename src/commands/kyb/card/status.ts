@@ -55,13 +55,13 @@ export default defineCommand({
     }
 
     const rows: Array<[string, string | undefined]> = [
-      ["Status", card.status],
-      ["Payment type", card.paymentType],
-      ["Reject reason", card.rejectReason],
-      ["KYB status", kybStatus],
-      ["Blocked by", kybBlocking ? t("kybBlockingCardActivation") : undefined]
+      [t("labelStatus"), card.status],
+      [t("labelPaymentType"), card.paymentType],
+      [t("labelRejectReason"), card.rejectReason],
+      [t("labelKybStatus"), kybStatus],
+      [t("labelBlockedBy"), kybBlocking ? t("kybBlockingCardActivation") : undefined]
     ];
-    process.stdout.write(renderKeyValues("Card-payment activation", rows) + "\n");
+    process.stdout.write(renderKeyValues(t("titleCardActivation"), rows) + "\n");
   })
 });
 

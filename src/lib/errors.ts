@@ -116,7 +116,7 @@ function hintFor(err: AtoaError, authMode: "jwt" | "sdk"): string | undefined {
   // Checked ahead of the auth branch: this arrives as a 403, so without it the user is told to
   // re-authenticate for what is really "your plan doesn't allow that".
   if (err.errorCode === ADDON_UPGRADE_REQUIRED) {
-    return "run 'atoa addons list' to see your plan's limits, then 'atoa addons upgrade' to raise them";
+    return t("hintAddonUpgrade");
   }
   if (err.kind === "auth" || err.kind === "forbidden") {
     // SDK-key commands authenticate with an API key, not a browser login — so don't
@@ -133,18 +133,19 @@ export function printError(err: unknown, opts?: {authMode?: "jwt" | "sdk"}): voi
 
   if (err instanceof AtoaError) {
     if (err.kind === "network") {
-      process.stderr.write(`error: ${err.message}\n`);
+      process.stderr.write(t("errorLine", {message: err.message}));
       return;
     }
-    const parts = [`error: ${err.message}`];
     const hint = hintFor(err, opts?.authMode ?? "jwt");
-    if (hint) parts[0] += ` — ${hint}`;
-    if (err.detail) parts.push(`  ${err.detail}`);
-    if (err.requestId) parts.push(`  request-id: ${err.requestId}`);
+    const parts = [
+      hint ? t("errorWithHint", {message: err.message, hint}) : t("errorHeadline", {message: err.message})
+    ];
+    if (err.detail) parts.push(t("errorDetail", {detail: err.detail}));
+    if (err.requestId) parts.push(t("errorRequestId", {requestId: err.requestId}));
     process.stderr.write(parts.join("\n") + "\n");
   } else if (err instanceof Error) {
-    process.stderr.write(`error: ${err.message}\n`);
+    process.stderr.write(t("errorLine", {message: err.message}));
   } else {
-    process.stderr.write(`error: ${String(err)}\n`);
+    process.stderr.write(t("errorLine", {message: String(err)}));
   }
 }

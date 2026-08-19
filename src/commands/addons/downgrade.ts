@@ -112,9 +112,9 @@ export default defineCommand({
 function withBlockerDetail(err: unknown, blockers: string[]): unknown {
   if (!(err instanceof AtoaError) || err.status !== 428) return err;
   const detail = blockers.length
-    ? `\n${blockers.map((b) => `  • ${b}`).join("\n")}`
+    ? blockers.map((b) => t("blockerListItem", {blocker: b})).join("")
     : t("downgradeRefusedCompareUsage");
-  return new AtoaError(`${err.message}${detail}`, err.kind, {
+  return new AtoaError(t("messageWithDetail", {message: err.message, detail}), err.kind, {
     status: err.status,
     errorCode: err.errorCode,
     requestId: err.requestId,

@@ -61,7 +61,7 @@ export default defineCommand({
     }
 
     const existing = rows.find((r) => r.id === roleId);
-    if (!existing) throw new AtoaError(`no role found with id ${roleId}`, "not_found");
+    if (!existing) throw new AtoaError(t("noRoleWithId", {roleId}), "not_found");
 
     const existingPermissionIds = permissionIdsOf(existing);
 
