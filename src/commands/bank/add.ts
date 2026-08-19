@@ -89,13 +89,13 @@ export default defineCommand({
     const acct = (data ?? {}) as Record<string, unknown>;
     const str = (v: unknown): string | undefined => (v === null || v === undefined || v === "" ? undefined : String(v));
     process.stdout.write(
-      renderKeyValues("✓ Bank account added", [
-        ["Bank", str(acct.bankName)],
-        ["Account", str(acct.maskedAccountNumber)],
-        ["Sort code", str(acct.sortCode)],
-        ["Nickname", str(acct.nickName)],
-        ["CoP check", str(acct.copVerified)],
-        ["ID", str(acct.id)]
+      renderKeyValues(t("titleBankAccountAdded"), [
+        [t("labelBank"), str(acct.bankName)],
+        [t("labelAccount"), str(acct.maskedAccountNumber)],
+        [t("labelSortCode"), str(acct.sortCode)],
+        [t("labelNickname"), str(acct.nickName)],
+        [t("labelCopCheck"), str(acct.copVerified)],
+        [t("labelId"), str(acct.id)]
       ]) + "\n"
     );
   })
@@ -155,8 +155,8 @@ async function collectAccountFields(
   };
 
   const {bankName, bankCode} = await pickBank(ctx, args, tty);
-  const sortCode = (await required(args.sortCode, "Sort code (6 digits, no spaces):", "Sort code")).replace(/\s+/g, "");
-  const accountNumber = await required(args.accountNumber, "Account number (usually 8 digits):", "Account number");
+  const sortCode = (await required(args.sortCode, t("promptSortCode"), t("labelSortCode"))).replace(/\s+/g, "");
+  const accountNumber = await required(args.accountNumber, t("promptAccountNumber"), t("labelAccountNumber"));
 
   // Confirm the account number on interactive entry — a typo guard.
   if (tty && !args.accountNumber) {

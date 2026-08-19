@@ -60,11 +60,7 @@ export async function buildContext(
     throw new AtoaError(t("noProfileConfigured"), "auth");
   }
   if (resolved.kind === "ambiguous") {
-    throw new AtoaError(
-      `Multiple profiles are configured (${resolved.names.join(", ")}). ` +
-        "Run `atoa profile use <name>` to set the active profile, or override per-command with `--profile <name>` or `ATOA_PROFILE=<name>`.",
-      "validation"
-    );
+    throw new AtoaError(t("profilesAmbiguous", {names: resolved.names.join(", ")}), "validation");
   }
 
   const env = parseEnvFlag(opts.env ?? resolved.profile.defaultEnv);
@@ -86,10 +82,7 @@ export async function buildContext(
     // user probably never meant to keep.
     const stub = isProfileIncomplete(resolved.profile);
     throw new AtoaError(
-      stub
-        ? `Profile "${resolved.name}" was never finished — it has no session and no business. ` +
-          `Continue onboarding with \`atoa signup\`, or drop it with \`atoa logout --profile ${resolved.name}\`.`
-        : `No credentials for ${resolved.name}. Run: atoa login --profile ${resolved.name}`,
+      stub ? t("profileNeverFinished", {name: resolved.name}) : t("noCredentialsForProfile", {name: resolved.name}),
       "auth"
     );
   }
@@ -151,34 +144,28 @@ async function adoptBusiness(http: HttpClient, profileName: string): Promise<Pro
     const {data} = await http.request({...V1_ROUTES.businesses.list});
     businesses = normalizeBusinesses(data);
   } catch {
-    throw new AtoaError(
-      `profile "${profileName}" has no business set, and the business list could not be reached. ` +
-        `Check your connection, or re-pair with \`atoa login --profile ${profileName}\`.`,
-      "network"
-    );
+    throw new AtoaError(t("businessListUnreachable", {name: profileName}), "network");
   }
 
   if (businesses.length === 0) {
-    throw new AtoaError(
-      `profile "${profileName}" has no business yet. Finish onboarding with \`atoa signup\`.`,
-      "validation"
-    );
+    throw new AtoaError(t("profileHasNoBusiness", {name: profileName}), "validation");
   }
   if (businesses.length > 1) {
-    const names = businesses.map((b) => `  ${b.id}  ${b.legalBusinessName || "(unnamed)"}`).join("\n");
+    const names = businesses
+      .map((b) => t("businessListItem", {id: b.id, name: b.legalBusinessName || t("unnamed")}))
+      .join("\n");
     throw new AtoaError(
-      `profile "${profileName}" has no business set and this account has ${businesses.length}:\n${names}\n` +
-        "Pick one with `atoa business use <id>`.",
+      t("profileBusinessAmbiguous", {name: profileName, count: businesses.length, businesses: names}),
       "business_selection"
     );
   }
 
   const {id, legalBusinessName} = businesses[0];
   await writeProfile(profileName, {businessId: id, activeBusinessId: id});
-  process.stderr.write(`Resumed profile "${profileName}" on business ${legalBusinessName || id}.\n`);
+  process.stderr.write(t("profileResumed", {name: profileName, business: legalBusinessName || id}));
 
   const updated = await readProfile(profileName);
-  if (!updated) throw new AtoaError(`profile "${profileName}" disappeared while being repaired.`, "generic");
+  if (!updated) throw new AtoaError(t("profileDisappeared", {name: profileName}), "generic");
   return updated;
 }
 
@@ -193,10 +180,7 @@ export async function ensureSdkKey(env: Env): Promise<string> {
   const existing = await latestSdkSecret(env);
   if (existing) return existing;
 
-  throw new AtoaError(
-    `No Atoa API key stored for ${env}. Mint a revocable one with \`atoa keys create --env ${env}\`, then retry.`,
-    "auth"
-  );
+  throw new AtoaError(t("noSdkKeyStored", {env}), "auth");
 }
 
 /**

@@ -129,7 +129,7 @@ async function promptForContact(
 
   const email = (
     await input({
-      message: `${t("labelEmailAddress")} (leave blank to use a phone number instead)`,
+      message: t("emailOrBlankForPhone", {label: t("labelEmailAddress")}),
       validate: (v) => !v.trim() || isValidEmail(v.trim()) || t("emailError")
     })
   ).trim();

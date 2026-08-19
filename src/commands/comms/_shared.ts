@@ -1,4 +1,5 @@
 import {Toggle} from "../../lib/enums";
+import {t} from "../../lib/i18n";
 
 export interface ChannelRow {
   channel: string;
@@ -23,16 +24,20 @@ export interface TopicRow {
 export function formatTopic(topic: TopicRow): string {
   const perm = topic.hasPermission
     ? ""
-    : `  (no permission${topic.noPermissionMessage ? `: ${topic.noPermissionMessage}` : ""})`;
+    : t("noPermissionSuffix", {
+        reason: topic.noPermissionMessage ? t("noPermissionReason", {reason: topic.noPermissionMessage}) : ""
+      });
 
-  const lines = [`${topic.displayName} [${topic.topicId}]${perm}`];
+  const lines = [t("topicHeading", {name: topic.displayName, id: topic.topicId, permission: perm})];
   for (const ch of topic.channels ?? []) {
     const state = ch.isAvailable
       ? ch.isEnabled
         ? Toggle.ON
         : Toggle.OFF
-      : `unavailable${ch.unavailableReason ? ` (${ch.unavailableReason})` : ""}`;
-    lines.push(`  ${ch.channel.padEnd(6)} ${state}`);
+      : t("channelUnavailable", {
+          reason: ch.unavailableReason ? t("channelUnavailableReason", {reason: ch.unavailableReason}) : ""
+        });
+    lines.push(t("channelLine", {channel: ch.channel.padEnd(6), state}));
   }
   return lines.join("\n");
 }

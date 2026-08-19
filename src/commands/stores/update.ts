@@ -111,7 +111,7 @@ async function pickStoreId(ctx: CommandContext): Promise<string> {
     message: t("selectStoreToUpdate"),
     pageSize: 12,
     choices: rows.map((s) => ({
-      name: `${s.locationName ?? "(unnamed)"} — ${s.addressPostalCode ?? ""}`,
+      name: t("storeChoice", {name: s.locationName ?? t("unnamed"), postalCode: s.addressPostalCode ?? ""}),
       value: s.id ?? ""
     }))
   });

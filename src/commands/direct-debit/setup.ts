@@ -184,7 +184,7 @@ async function collectAccountNumber(
     const {input} = await import("@inquirer/prompts");
     const answer = (
       await input({
-        message: `${t("labelAccountNumber")} (${masked} ${t("onFilePressEnterToKeep")})`,
+        message: t("accountNumberOnFile", {label: t("labelAccountNumber"), masked}),
         validate: (v) => (v.trim() ? RULES.accountNumber(v) : true)
       })
     ).trim();
@@ -226,7 +226,10 @@ async function assertNoActiveMandate(ctx: CommandContext): Promise<void> {
   if (!hasActiveMandate(plan)) return;
 
   const status = plan?.stripeCustomer?.mandateDetails?.status;
-  throw new AtoaError(t("mandateAlreadySetUp", {status: status ? ` (status: ${status})` : ""}), "validation");
+  throw new AtoaError(
+    t("mandateAlreadySetUp", {status: status ? t("mandateStatusSuffix", {status}) : ""}),
+    "validation"
+  );
 }
 
 /**

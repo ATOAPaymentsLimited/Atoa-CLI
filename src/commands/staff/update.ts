@@ -92,7 +92,7 @@ export default defineCommand({
     }
 
     const existing = rows.find((r) => r.user?.id === userId);
-    if (!existing) throw new AtoaError(`no staff member found with user id ${userId}`, "not_found");
+    if (!existing) throw new AtoaError(t("noStaffWithUserId", {userId}), "not_found");
 
     const current = {
       firstName: existing.user?.firstName ?? "",

@@ -8,6 +8,7 @@
 
 import Table from "cli-table3";
 import * as yaml from "js-yaml";
+import {t} from "./i18n";
 
 export type OutputFormat = "json" | "table" | "yaml";
 
@@ -47,12 +48,12 @@ export function isInteractive(formatExplicit: boolean): boolean {
 export function renderKeyValues(heading: string, rows: Array<[string, string | undefined]>): string {
   const present = rows.filter((r): r is [string, string] => Boolean(r[1]));
   const pad = present.length ? Math.max(...present.map(([k]) => k.length)) : 0;
-  return [heading, "", ...present.map(([k, v]) => `  ${k.padEnd(pad)}  ${v}`)].join("\n");
+  return [heading, "", ...present.map(([k, v]) => t("keyValueRow", {key: k.padEnd(pad), value: v}))].join("\n");
 }
 
 export function resolveFormat(requested: string | undefined): OutputFormat {
   if (requested === "json" || requested === "table" || requested === "yaml") return requested;
-  if (requested) throw new Error(`Invalid --output value '${requested}'. Use json|table|yaml.`);
+  if (requested) throw new Error(t("invalidOutputValue", {requested}));
   return "table";
 }
 
@@ -86,7 +87,7 @@ function tableWidth(): number {
 
 function renderTable(data: unknown): string {
   if (Array.isArray(data)) {
-    if (data.length === 0) return "(no rows)";
+    if (data.length === 0) return t("noRows");
     const first = data[0];
     if (typeof first !== "object" || first === null) {
       return data.map((v) => stripControlChars(String(v))).join("\n");
@@ -95,7 +96,7 @@ function renderTable(data: unknown): string {
     // Split the width evenly, with a floor so a wide row degrades into wrapped cells
     // rather than unreadable slivers.
     const per = Math.max(12, Math.floor((tableWidth() - cols.length - 1) / cols.length));
-    const t = new Table({
+    const table = new Table({
       head: cols.map(stripControlChars),
       colWidths: cols.map(() => per),
       wordWrap: true,
@@ -104,20 +105,20 @@ function renderTable(data: unknown): string {
       wrapOnWordBoundary: false
     });
     for (const row of data as Array<Record<string, unknown>>) {
-      t.push(cols.map((c) => stringify(row[c])));
+      table.push(cols.map((c) => stringify(row[c])));
     }
-    return t.toString();
+    return table.toString();
   }
   if (typeof data === "object" && data !== null) {
     const rows = flatten(data as Record<string, unknown>);
-    if (rows.length === 0) return "(no fields)";
+    if (rows.length === 0) return t("noFields");
     const keyWidth = Math.min(Math.max(...rows.map(([k]) => k.length)) + 2, 34);
     const valueWidth = Math.max(20, tableWidth() - keyWidth - 3);
-    const t = new Table({colWidths: [keyWidth, valueWidth], wordWrap: true, wrapOnWordBoundary: false});
+    const table = new Table({colWidths: [keyWidth, valueWidth], wordWrap: true, wrapOnWordBoundary: false});
     for (const [k, v] of rows) {
-      t.push({[k]: stringify(v)});
+      table.push({[k]: stringify(v)});
     }
-    return t.toString();
+    return table.toString();
   }
   return stripControlChars(String(data));
 }

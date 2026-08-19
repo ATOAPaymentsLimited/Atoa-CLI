@@ -20,7 +20,7 @@ const ON_OFF_HINT = ON_OFF.join("|");
 export default defineCommand({
   meta: {
     name: "set",
-    description: 'Toggle notification channels for a topic (e.g. "atoa comms set payouts --email off")'
+    description: t("cmdCommsSet")
   },
   args: withCommonArgs({
     topic: {type: "positional", required: true, description: t("argCommsTopic")},

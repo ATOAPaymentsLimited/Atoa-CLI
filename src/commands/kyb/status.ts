@@ -44,11 +44,11 @@ export default defineCommand({
     }
 
     const rows: Array<[string, string | undefined]> = approved
-      ? [["Status", kyb.status]]
+      ? [[t("labelStatus"), kyb.status]]
       : [
-          ["Status", kyb.status],
-          ["Reason", kyb.rejectRemarks]
+          [t("labelStatus"), kyb.status],
+          [t("labelReason"), kyb.rejectRemarks]
         ];
-    process.stdout.write(renderKeyValues("KYB verification", rows) + "\n");
+    process.stdout.write(renderKeyValues(t("titleKybVerification"), rows) + "\n");
   })
 });

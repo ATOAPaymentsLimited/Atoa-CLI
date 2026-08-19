@@ -36,7 +36,7 @@ export default defineCommand({
         throw new AtoaError(t("passYesToDeleteRole"), "validation");
       }
       const {confirm} = await import("@inquirer/prompts");
-      const ok = await confirm({message: `Delete role "${display ?? roleId}"?`, default: false});
+      const ok = await confirm({message: t("confirmDeleteRole", {name: display ?? roleId}), default: false});
       if (!ok) return;
     }
 

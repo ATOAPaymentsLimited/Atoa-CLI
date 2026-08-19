@@ -11,8 +11,8 @@ export const validateName =
   (label: string) =>
   (v: string): true | string => {
     const s = (v ?? "").trim();
-    if (!s) return `${label} cannot be empty`;
-    if (s.length > 100) return `${label} should be at most 100 characters long`;
+    if (!s) return t("nameCannotBeEmpty", {label});
+    if (s.length > 100) return t("nameTooLong", {label});
     return NAME_RE.test(s) || t("dontUsePunctuation");
   };
 
