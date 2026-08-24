@@ -7,7 +7,7 @@ import {AtoaError} from "../../lib/errors";
 import {validateStaffName, isValidEmail, validateCountryCode, validatePhoneNumber} from "../../lib/validators";
 import {DEFAULT_PHONE_COUNTRY_CODE, STORES_PAGE_SIZE} from "../../lib/constants";
 import {t} from "../../lib/i18n";
-import {projectStaff, parseRepeatedFlag} from "./_shared";
+import {projectStaff, parseRepeatedFlag, type StaffRow} from "./_shared";
 import type {CommandContext} from "../../lib/context";
 
 type StaffAddArgs = CommonOptions & {
@@ -94,7 +94,7 @@ export default defineCommand({
       return;
     }
     const {data} = await ctx.http.request({...V1_ROUTES.staff.create, body});
-    ctx.print(projectStaff((data ?? {}) as never));
+    ctx.print(projectStaff((data ?? {}) as StaffRow));
   })
 });
 

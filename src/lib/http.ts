@@ -2,7 +2,8 @@
 /* eslint-disable max-lines-per-function */
 import {Agent, fetch as undiciFetch, FormData} from "undici";
 import {randomUUID} from "crypto";
-import {mapHttpResponse, AtoaError} from "./errors";
+import {mapHttpResponse, AtoaError, rawErrorCodeOf} from "./errors";
+import {BackendErrorCode} from "./enums";
 import {redactAuthHeader} from "./auth";
 import {V1_ROUTES} from "./v1-routes";
 import type {JwtTokens} from "./secrets-store";
@@ -221,9 +222,14 @@ export function buildHttpClient(opts: {
     // business logic (auth is rejected pre-processing), so the 401'd attempt had no side effect;
     // and (2) writes (POST/PUT/PATCH) carry the SAME Idempotency-Key on the replay, so even if
     // (1) were ever violated the backend dedups the duplicate. DELETE is naturally idempotent.
-    // The only unsafe case is a backend that 401s AFTER a partial mutation AND ignores the
-    // Idempotency-Key — revisit this replay if that ever becomes possible.
-    if (response.status === 401 && mode === "jwt" && allowRefresh) {
+    // The bank flow breaks that assumption: OTP required/wrong/throttled all answer 401, each
+    // after already acting, so replaying re-sends a code. Allowlisted rather than denylisted —
+    // an unknown code left refreshable would re-send it, which is the worse way to be wrong.
+    // Raw, not the narrowed reader: this test grants replay on absence, so a marker it discards as
+    // meaningless (BAD_REQUEST, a class name) would be read as "no code" and re-send the request.
+    const code = rawErrorCodeOf(data);
+    const refreshable = !code || code === BackendErrorCode.INVALID_CREDENTIAL;
+    if (response.status === 401 && mode === "jwt" && allowRefresh && refreshable) {
       await refreshJwtTokens();
       // Reuse the (possibly auto-generated) Idempotency-Key — the replay is the same logical write.
       return send({...reqOpts, idempotencyKey}, mode, false);
@@ -273,8 +279,11 @@ export function buildHttpClient(opts: {
       // (network, 5xx) keeps the tokens and surfaces as-is.
       if (err instanceof AtoaError && (err.status === 400 || err.status === 401)) {
         await jwt.clearTokens();
+        // Tagged so callers can tell a dead session from a domain 401 they should retry —
+        // withOtp would otherwise spend OTP attempts on it.
         throw new AtoaError("Session expired — run `atoa login`", "auth", {
           status: err.status,
+          errorCode: BackendErrorCode.INVALID_CREDENTIAL,
           requestId: err.requestId
         });
       }

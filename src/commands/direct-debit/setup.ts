@@ -16,6 +16,7 @@ import {
   type BankAccount
 } from "./_shared";
 import {t} from "../../lib/i18n";
+import {normaliseSortCode, normaliseAccountNumber} from "../../lib/validators";
 import type {CommandContext} from "../../lib/context";
 
 type Field = "accountNumber" | "sortCode" | "name" | "email" | "addressLine1" | "addressLine2" | "city" | "postalCode";
@@ -258,7 +259,12 @@ function buildBody(fields: Partial<Record<Field, string>>, bankCode: string | un
     },
     payment_method_data: {
       type: "bacs_debit",
-      bacs_debit: {type: "bacs_debit", account_number: fields.accountNumber, sort_code: fields.sortCode},
+      // Normalised, not sent raw: the rules accept "12-34-56" / spaced digits, the backend doesn't.
+      bacs_debit: {
+        type: "bacs_debit",
+        account_number: normaliseAccountNumber(fields.accountNumber),
+        sort_code: normaliseSortCode(fields.sortCode)
+      },
       billing_details: {
         address: {
           city: fields.city,

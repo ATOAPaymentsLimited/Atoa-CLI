@@ -9,6 +9,8 @@ import {
   fetchFeatureUsage,
   partitionByDirection,
   formatPlanChoice,
+  formatFeatureUsage,
+  planFeatureMap,
   type AddonPlan
 } from "./_shared";
 
@@ -38,6 +40,18 @@ export default defineCommand({
 
     const currentOrder = current.addonPlan?.planOrder ?? -1;
     const {upgrades, downgrades} = partitionByDirection(available.availablePlans ?? [], currentOrder);
+    const limits = current.addonPlan ? planFeatureMap(current.addonPlan) : new Map();
+    // `included` matters: a feature absent from the plan is not the same as one with no cap,
+    // and collapsing both to limit=null would render "unlimited" for a feature you can't use.
+    const usageRows = usage.map((u) => {
+      const feature = limits.get(u.featureType);
+      return {
+        ...u,
+        included: Boolean(feature),
+        limit: feature?.limit ?? null,
+        overlimitCharges: feature?.overlimitCharges ?? 0
+      };
+    });
 
     const out = {
       currentPlan: current.addonPlan
@@ -50,7 +64,7 @@ export default defineCommand({
             endDate: current.endDate
           }
         : null,
-      featureUsage: usage,
+      featureUsage: usageRows,
       upgradeTo: upgrades.map((p) => ({id: p.id, name: p.name, monthlyAmount: p.monthlyAmount})),
       downgradeTo: downgrades.map((p) => ({id: p.id, name: p.name, monthlyAmount: p.monthlyAmount}))
     };
@@ -74,7 +88,9 @@ export default defineCommand({
       process.stdout.write(
         renderKeyValues(
           t("titleFeatureUsage"),
-          usage.map((u) => [u.featureType, String(u.usage)] as [string, string])
+          usageRows.map(
+            (u) => [u.featureType, formatFeatureUsage(u.usage, u.included ? u : undefined)] as [string, string]
+          )
         ) + "\n\n"
       );
     }

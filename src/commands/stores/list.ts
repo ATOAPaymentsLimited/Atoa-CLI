@@ -4,7 +4,7 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages, presentList} from "../../lib/list-view";
 import {STORES_PAGE_SIZE} from "../../lib/constants";
-import {projectStore} from "./_shared";
+import {projectStore, type StoreRow} from "./_shared";
 
 export default defineCommand({
   meta: {name: "list", description: t("cmdStoresList")},
@@ -19,7 +19,7 @@ export default defineCommand({
     // display so the drill-in detail shows the same tidy shape as the summary, rather than the
     // raw record with its nested bank account and image list.
     const rows = (await fetchAllPages(ctx, V1_ROUTES.stores.list, {}, STORES_PAGE_SIZE)).map((r) =>
-      projectStore(r as never)
+      projectStore(r as StoreRow)
     );
     await presentList(ctx, rows, {
       title: t("titleStores"),

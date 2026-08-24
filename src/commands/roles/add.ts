@@ -6,7 +6,14 @@ import {resolveField} from "../../lib/prompt-field";
 import {validateRoleName} from "../../lib/validators";
 import {t} from "../../lib/i18n";
 import {fetchAllPages} from "../../lib/list-view";
-import {pickPermissionIds, resolvePermissionIds, withUpgradeHint, parseRepeatedFlag, projectRole} from "./_shared";
+import {
+  pickPermissionIds,
+  resolvePermissionIds,
+  withUpgradeHint,
+  parseRepeatedFlag,
+  projectRole,
+  type RoleRow
+} from "./_shared";
 import type {CommandContext} from "../../lib/context";
 
 type RolesCreateArgs = CommonOptions & {
@@ -68,7 +75,7 @@ export default defineCommand({
 
     try {
       const {data} = await ctx.http.request({...V1_ROUTES.roles.create, body});
-      ctx.print(projectRole((data ?? {}) as never));
+      ctx.print(projectRole((data ?? {}) as RoleRow));
     } catch (err) {
       throw withUpgradeHint(err);
     }

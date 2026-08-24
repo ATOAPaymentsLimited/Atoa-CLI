@@ -1,6 +1,6 @@
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
-import {AddonFeatureType} from "../../lib/enums";
+import {AddonFeatureType, KYB_NOT_APPROVED, type MerchantStatus} from "../../lib/enums";
 import {t} from "../../lib/i18n";
 import type {CommandContext} from "../../lib/context";
 
@@ -41,6 +41,26 @@ export interface CurrentPlan {
   endDate?: string;
   status?: boolean;
   renewalType?: string;
+}
+
+/**
+ * Add-ons are only purchasable once verification passes, so refuse client-side with "verify your
+ * business" rather than letting the request fail less clearly. Downgrades are NOT gated.
+ *
+ * Best-effort: an unreadable business record lets the attempt through to the backend rather than
+ * inventing a refusal.
+ */
+export async function assertKybApprovedForUpgrade(ctx: CommandContext): Promise<void> {
+  let status: string | undefined;
+  try {
+    const {data} = await ctx.http.request({...V1_ROUTES.onboarding.getBusiness});
+    status = (data as {business?: {status?: string}})?.business?.status;
+  } catch {
+    return;
+  }
+  if (status && KYB_NOT_APPROVED.includes(status as MerchantStatus)) {
+    throw new AtoaError(t("addonsNeedVerifiedBusiness"), "validation");
+  }
 }
 
 export async function fetchCurrentPlan(ctx: CommandContext): Promise<CurrentPlan> {
@@ -114,6 +134,18 @@ export function partitionByDirection(
     upgrades: subscribable.filter((p) => p.planOrder > currentOrder).sort((a, b) => a.planOrder - b.planOrder),
     downgrades: subscribable.filter((p) => p.planOrder < currentOrder).sort((a, b) => b.planOrder - a.planOrder)
   };
+}
+
+/** Usage against the plan's cap — a bare `1` doesn't say whether the plan allows one or five. */
+export function formatFeatureUsage(used: number, feature?: {limit: number | null; overlimitCharges: number}): string {
+  if (!feature) return t("usageNotIncluded", {used});
+  // Falsy, not just null: the backend caps on `!featureLimit`, so a 0 is uncapped there too and
+  // rendering it as "0 / 0" would read as a refusal where the API allows the action.
+  if (!feature.limit) return t("usageUnlimited", {used});
+  if (feature.overlimitCharges > 0) {
+    return t("usageWithOverage", {used, limit: feature.limit, amount: feature.overlimitCharges});
+  }
+  return t("usageOfLimit", {used, limit: feature.limit});
 }
 
 export function formatPlanChoice(p: AddonPlan): string {
