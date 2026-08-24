@@ -44,7 +44,11 @@ export const BackendErrorCode = {
   /** The signed-in user's role lacks the permission; only an Owner or Admin can grant it. */
   ROLE_UNAUTHORIZED_ACCESS: "ROLE_UNAUTHORIZED_ACCESS",
   /** Business is not KYB-approved. Its `title` carries the merchant status. */
-  KYB_VERIFICATION_REQUIRED: "KYB_VERIFICATION_REQUIRED"
+  KYB_VERIFICATION_REQUIRED: "KYB_VERIFICATION_REQUIRED",
+  /** Wrong code, attempts still remaining — the one OTP failure a retype can actually fix. */
+  BANK_INCORRECT_OTP: "BANK_INCORRECT_OTP",
+  /** The code timed out. Retyping it cannot help; a fresh one must be requested. */
+  BANK_OTP_CODE_EXPIRED: "BANK_OTP_CODE_EXPIRED"
 } as const;
 export type BackendErrorCode = (typeof BackendErrorCode)[keyof typeof BackendErrorCode];
 
@@ -71,6 +75,17 @@ export const GENERIC_BAD_REQUEST = "BAD_REQUEST";
  * code (and answers 401); every other surface throws a bare 400 whose only marker is the wording,
  * so the message match in mapHttpResponse is load-bearing, not belt-and-braces.
  */
+/**
+ * OTP outcomes that answer 401 but say nothing about the session — the code was wrong, expired, or
+ * simply not supplied yet. withOtp intercepts these, so they reach the printer only from a caller
+ * that isn't OTP-aware; left as auth they would tell the user to sign in over a mistyped code.
+ */
+export const OTP_DOMAIN_CODES: readonly string[] = [
+  BackendErrorCode.OTP_VERIFICATION_IS_REQUIRED,
+  BackendErrorCode.BANK_INCORRECT_OTP,
+  BackendErrorCode.BANK_OTP_CODE_EXPIRED
+];
+
 export const OTP_THROTTLE_CODES: readonly string[] = [
   BackendErrorCode.BANK_OTP_LIMIT_REACH,
   BackendErrorCode.BANK_OTP_VERIFICATION_LIMIT_REACH,

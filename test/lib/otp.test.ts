@@ -76,6 +76,25 @@ describe("withOtp", () => {
     expect(prompt).toHaveBeenCalledTimes(1); // not re-prompted
   });
 
+  it("stops on an expired code instead of re-prompting four more times", async () => {
+    // Expiry is raised only for a code that matched, so retyping it re-fails identically. The
+    // outcome was always correct; this is about not asking five times to say the same thing.
+    const expired = {
+      throw: new AtoaError("Code expired. Request a new one.", "auth", {
+        status: 401,
+        errorCode: "BANK_OTP_CODE_EXPIRED"
+      })
+    };
+    const {http} = fakeHttp([{throw: otpRequired(401)}, expired, expired, expired, expired, expired]);
+    const prompt = vi.fn(async () => "123456");
+
+    await expect(
+      withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, promptOtp: prompt})
+    ).rejects.toMatchObject({kind: "validation"});
+
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
   it("stops immediately when the OTP throttle trips, even though it arrives as a 401", async () => {
     const {http, calls} = fakeHttp([
       {throw: otpRequired(401)},

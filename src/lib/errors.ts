@@ -1,5 +1,11 @@
 import {t} from "./i18n";
-import {ACCESS_DENIED_CODES, BackendErrorCode, GENERIC_BAD_REQUEST, OTP_THROTTLE_CODES} from "./enums";
+import {
+  ACCESS_DENIED_CODES,
+  BackendErrorCode,
+  GENERIC_BAD_REQUEST,
+  OTP_DOMAIN_CODES,
+  OTP_THROTTLE_CODES
+} from "./enums";
 
 export type AtoaErrorKind =
   | "auth" // exit 2 — HTTP 401
@@ -136,6 +142,9 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
 
   // Same trap on the 401s: these three refuse the access, not the credential.
   if (errorCode && ACCESS_DENIED_CODES.includes(errorCode)) kind = "forbidden";
+
+  // And these describe the OTP, not the session — a mistyped or expired code is bad input.
+  if (errorCode && OTP_DOMAIN_CODES.includes(errorCode)) kind = "validation";
 
   // For that one case the useful headline is `title`; `message` carries the addon's marketing
   // description ("Manage multiple store locations efficiently…"), which reads as a sales pitch
