@@ -94,9 +94,14 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
           return {data: res.data, otpUsed: true};
         }
       }
-      // Wrong/expired code — retry while attempts remain. Status differs by surface: onboarding
-      // answers 400, the bank flow 401 (CustomUnauthorized). INVALID_CREDENTIAL is excluded: that
-      // 401 is a dead access token, and re-prompting spends OTP attempts no retype can fix.
+      // Expiry is only raised for a code that MATCHED, so retyping it re-fails identically —
+      // 5 prompts and 5 round-trips to reach the message the first attempt already had.
+      if (ae.errorCode === BackendErrorCode.BANK_OTP_CODE_EXPIRED) {
+        throw new AtoaError(ae.message, "validation", {status: ae.status, requestId: ae.requestId});
+      }
+      // Wrong code — retry while attempts remain. Status differs by surface: onboarding answers 400,
+      // the bank flow 401. INVALID_CREDENTIAL is excluded: that 401 is a dead access token, and
+      // re-prompting spends OTP attempts no retype can fix.
       const wrongCode =
         ae.status === 400 || (ae.status === 401 && ae.errorCode !== BackendErrorCode.INVALID_CREDENTIAL);
       if (wrongCode && attempt < maxAttempts) {

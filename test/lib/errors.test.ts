@@ -128,6 +128,20 @@ describe("access refusals are not credential failures", () => {
     expect(captureStderr(err)).toContain("atoa kyb status");
   });
 
+  // These 401s describe the OTP, not the session. withOtp normally intercepts them, so this covers
+  // the case where a caller that isn't OTP-aware surfaces one: "run `atoa login`" over a mistyped
+  // code sends the user to fix something that was never broken.
+  it.each([
+    ["OTP_VERIFICATION_IS_REQUIRED", "Please verify with the OTP sent to you."],
+    ["BANK_INCORRECT_OTP", "Incorrect code used. 3 attempts remaining"],
+    ["BANK_OTP_CODE_EXPIRED", "Code expired."]
+  ])("%s is bad input, not a dead session", (name, message) => {
+    const err = mapHttpResponse(401, {name, message}, "req");
+    expect(err.kind).toBe("validation");
+    expect(exitCodeFor(err.kind)).toBe(3);
+    expect(captureStderr(err)).not.toContain("atoa login");
+  });
+
   it("leaves a genuine dead token as auth with the login hint", () => {
     const err = mapHttpResponse(401, {name: "INVALID_CREDENTIAL", message: "Invalid token. Expired."}, "req");
     expect(err.kind).toBe("auth");
