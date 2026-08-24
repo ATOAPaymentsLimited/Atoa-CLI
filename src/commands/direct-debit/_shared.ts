@@ -1,28 +1,22 @@
 import {V1_ROUTES} from "../../lib/v1-routes";
-import {isValidEmail, validateAddress, validateAddressLine2, validatePostcode} from "../../lib/validators";
+import {
+  isValidEmail,
+  validateAddress,
+  validateAddressLine2,
+  validatePostcode,
+  validateBankAccountNumber,
+  validateSortCode,
+  maskAccountNumber as maskDigits
+} from "../../lib/validators";
 import {AtoaError} from "../../lib/errors";
 import {MandateStatus} from "../../lib/enums";
 import {t} from "../../lib/i18n";
 import type {CommandContext} from "../../lib/context";
 
-/**
- * Direct Debit field rules.
- *
- * A digit field reports its two failure modes separately: wrong characters and wrong length are
- * different mistakes, and telling someone who typed "12jjjjjj" that the value must be 8
- * characters long names the wrong problem — they typed exactly 8.
- */
-const digitsOfLength =
-  (length: number, wrongChars: string, wrongLength: string) =>
-  (v: string): true | string => {
-    const s = v.trim();
-    if (!/^\d*$/.test(s)) return wrongChars;
-    return s.length === length || wrongLength;
-  };
-
+/** Direct Debit field rules. accountNumber/sortCode are shared with `bank add` — see validators.ts. */
 export const RULES: Record<string, (value: string) => true | string> = {
-  accountNumber: digitsOfLength(8, t("bankAccountNumberDigitsError"), t("bankAccountNumberLengthError")),
-  sortCode: digitsOfLength(6, t("sortCodeDigitsErrorMsg"), t("sortCodeLengthErrorMsg")),
+  accountNumber: validateBankAccountNumber,
+  sortCode: validateSortCode,
   name: (v) => {
     const s = v.trim();
     if (!s) return t("accountHolderNameRequiredErrorMsg");
@@ -75,11 +69,11 @@ export async function fetchPrefillSources(ctx: CommandContext): Promise<PrefillS
   const [bank, user, business] = await Promise.all([
     request<BankAccount[]>(ctx, V1_ROUTES.bank.list),
     request<UserProfile>(ctx, V1_ROUTES.identity.get),
-    request<Business>(ctx, V1_ROUTES.onboarding.getBusiness)
+    request<BusinessUser>(ctx, V1_ROUTES.onboarding.getBusiness)
   ]);
 
   const all = Array.isArray(bank) ? bank : [];
-  const info = business?.businessInfo;
+  const info = business?.business?.businessInfo;
   const firstName = user?.firstName?.trim();
   const lastName = user?.lastName?.trim();
 
@@ -147,7 +141,7 @@ export function describeAccount(a: BankAccount): string {
   return (
     [
       a.bankName,
-      a.maskedAccountNumber ?? maskNumber(a.accountNumber),
+      a.maskedAccountNumber ?? maskDigits(a.accountNumber),
       a.sortCode,
       a.enabled === false ? "(disabled)" : null
     ]
@@ -158,12 +152,7 @@ export function describeAccount(a: BankAccount): string {
 
 /** Renders a hint for a prefilled account number without printing it in full. */
 export function maskAccountNumber(prefill: DirectDebitPrefill): string | undefined {
-  return prefill.maskedAccountNumber ?? maskNumber(prefill.accountNumber);
-}
-
-function maskNumber(full: string | undefined): string | undefined {
-  const s = full?.trim();
-  return s && s.length >= 4 ? `••••${s.slice(-4)}` : undefined;
+  return prefill.maskedAccountNumber ?? maskDigits(prefill.accountNumber);
 }
 
 export type BankAccount = {
@@ -175,12 +164,15 @@ export type BankAccount = {
   enabled?: boolean;
 };
 type UserProfile = {firstName?: string; lastName?: string; email?: string};
-type Business = {
-  businessInfo?: {
-    addressLine1?: string;
-    addressLine2?: string;
-    cityOrTown?: string;
-    addressPostalCode?: string | number;
+/** The route returns the business-USER record — the address is at `business.businessInfo`, not the top-level `businessInfo`. */
+type BusinessUser = {
+  business?: {
+    businessInfo?: {
+      addressLine1?: string;
+      addressLine2?: string;
+      cityOrTown?: string;
+      addressPostalCode?: string | number;
+    };
   };
 };
 

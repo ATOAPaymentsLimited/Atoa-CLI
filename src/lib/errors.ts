@@ -1,4 +1,5 @@
 import {t} from "./i18n";
+import {ACCESS_DENIED_CODES, BackendErrorCode, GENERIC_BAD_REQUEST, OTP_THROTTLE_CODES} from "./enums";
 
 export type AtoaErrorKind =
   | "auth" // exit 2 — HTTP 401
@@ -65,6 +66,42 @@ export function exitCodeFor(kind: AtoaErrorKind | undefined): number {
   return EXIT_CODES[kind ?? "generic"] ?? 1;
 }
 
+/** A backend code is SCREAMING_SNAKE; a class name like `HttpException` is not, and isn't one. */
+const CODE_SHAPE = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * Any code marker present on the body, unfiltered. The API carries one in `errorCode`, `name` or
+ * `customName` depending on the endpoint — some error bodies omit `name` entirely and carry only
+ * `customName`, so without the third a coded OTP throttle would look uncoded.
+ *
+ * Use this, not errorCodeOf, wherever absence is what grants permission: the 401 replay guard is
+ * deny-by-default, so a marker it fails to see becomes a request it re-sends.
+ */
+export function rawErrorCodeOf(body: unknown): string | undefined {
+  return codeMarkersOf(body)[0];
+}
+
+/** Every code-shaped field present, in descending order of trust. */
+function codeMarkersOf(body: unknown): string[] {
+  if (typeof body !== "object" || body === null) return [];
+  const b = body as Record<string, unknown>;
+  return [b["errorCode"], b["name"], b["customName"]]
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+    .map((v) => v.trim().slice(0, 64));
+}
+
+/**
+ * The same field narrowed to codes that actually mean something. `BAD_REQUEST` is substituted
+ * whenever the API wraps an error that had no code, and some bodies carry an exception class name
+ * instead — both assert a specificity that isn't real, so for classification they are worse than
+ * nothing.
+ */
+export function errorCodeOf(body: unknown): string | undefined {
+  // Scans all three rather than narrowing whichever came first: a body carrying both a class name
+  // and a real code would otherwise be judged by the class name and fall through to the wording.
+  return codeMarkersOf(body).find((c) => c !== GENERIC_BAD_REQUEST && CODE_SHAPE.test(c));
+}
+
 export function mapHttpResponse(status: number, body: unknown, requestId: string | undefined): AtoaError {
   let kind: AtoaErrorKind;
   if (status === 401) kind = "auth";
@@ -77,23 +114,28 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
   const b = (body ?? {}) as Record<string, unknown>;
   const raw = (b["message"] ?? b["error"] ?? `HTTP ${status}`) as string;
   const message = typeof raw === "string" ? raw.slice(0, 200) : `HTTP ${status}`;
-  // OTP throttling arrives with a 401/403 status even though it's really a "slow down" error
-  // (e.g. "…maximum number of OTP requests…"). Reclassify by message so we neither tell the user
-  // to re-authenticate nor exit with the auth code — it's a rate limit, cleared by waiting.
-  if (/maximum number of otp requests|too many otp requests/i.test(message)) {
+  const errorCode = errorCodeOf(b);
+
+  // Both OTP throttles — too many sends, and too many wrong codes — are a "slow down", not an auth
+  // failure, and neither is cleared by retyping. Both arms are needed: the bank surface tags them
+  // with a code, every other surface throws a bare 400 whose only marker is the wording.
+  if (
+    (errorCode && OTP_THROTTLE_CODES.includes(errorCode)) ||
+    /maximum number of otp requests|too many otp requests|incorrect code too many times|maximum number of attempts reached|too many failed attempts/i.test(
+      message
+    )
+  ) {
     kind = "rate_limit";
   }
-  // Prefer an explicit errorCode; fall back to the backend's `name` field, which carries a
-  // stable SCREAMING_SNAKE code (e.g. OTP_VERIFICATION_IS_REQUIRED) used to branch control flow.
-  const codeRaw =
-    typeof b["errorCode"] === "string" ? b["errorCode"] : typeof b["name"] === "string" ? b["name"] : undefined;
-  const errorCode = codeRaw?.trim().slice(0, 64);
   const ad = b["additionalData"];
   const additionalData = ad && typeof ad === "object" ? (ad as Record<string, unknown>) : undefined;
 
   // An addon-plan refusal is served as 403, but re-authenticating can never clear it — leaving it
   // classified as "forbidden" made the CLI exit 2 and tell the user to run `atoa login`.
   if (errorCode === ADDON_UPGRADE_REQUIRED) kind = "plan_limit";
+
+  // Same trap on the 401s: these three refuse the access, not the credential.
+  if (errorCode && ACCESS_DENIED_CODES.includes(errorCode)) kind = "forbidden";
 
   // For that one case the useful headline is `title`; `message` carries the addon's marketing
   // description ("Manage multiple store locations efficiently…"), which reads as a sales pitch
@@ -103,13 +145,12 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
   const title = typeof titleRaw === "string" ? titleRaw.trim().slice(0, 200) : "";
   const useTitle = kind === "plan_limit" && title.length > 0 && title !== message;
 
-  return new AtoaError(useTitle ? title : message, kind, {
-    status,
-    errorCode,
-    requestId,
-    additionalData,
-    detail: useTitle ? message : undefined
-  });
+  // The KYB refusal instead puts the merchant status (PENDING/IN_REVIEW/KYB_HOLD) in `title` —
+  // which stage is blocking is the one thing its fixed message doesn't say.
+  const kybStatus = errorCode === BackendErrorCode.KYB_VERIFICATION_REQUIRED && title ? title : undefined;
+  const detail = useTitle ? message : kybStatus ? t("kybBusinessStatus", {status: kybStatus}) : undefined;
+
+  return new AtoaError(useTitle ? title : message, kind, {status, errorCode, requestId, additionalData, detail});
 }
 
 function hintFor(err: AtoaError, authMode: "jwt" | "sdk"): string | undefined {
@@ -118,6 +159,11 @@ function hintFor(err: AtoaError, authMode: "jwt" | "sdk"): string | undefined {
   if (err.errorCode === ADDON_UPGRADE_REQUIRED) {
     return t("hintAddonUpgrade");
   }
+  if (err.errorCode === BackendErrorCode.UNAUTHORIZED_ACCESS) return t("hintCliRouteNotEnabled");
+  if (err.errorCode === BackendErrorCode.KYB_VERIFICATION_REQUIRED) return t("hintKybVerify");
+  // ROLE_UNAUTHORIZED_ACCESS names its own remedy ("request access from the Owner or Admin"),
+  // so anything added here would only argue with it.
+  if (err.errorCode === BackendErrorCode.ROLE_UNAUTHORIZED_ACCESS) return undefined;
   if (err.kind === "auth" || err.kind === "forbidden") {
     // SDK-key commands authenticate with an API key, not a browser login — so don't
     // tell the user to `atoa login` there; point them at the key instead.

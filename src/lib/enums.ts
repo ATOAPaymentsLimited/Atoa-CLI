@@ -14,6 +14,14 @@ export type MerchantStatus = (typeof MerchantStatus)[keyof typeof MerchantStatus
 /** Not-submitted KYB states. The card-signup page gates on this same set — keep them in step. */
 export const KYB_NOT_SUBMITTED: readonly MerchantStatus[] = [MerchantStatus.PENDING, MerchantStatus.REJECTED];
 
+/** Everything short of APPROVED. Add-on upgrades are refused until verification passes. */
+export const KYB_NOT_APPROVED: readonly MerchantStatus[] = [
+  MerchantStatus.PENDING,
+  MerchantStatus.IN_REVIEW,
+  MerchantStatus.REJECTED,
+  MerchantStatus.KYB_HOLD
+];
+
 /** NOT_INITIATED is synthesised client-side: the backend 404s rather than returning a status. */
 export const CardApplicationStatus = {
   NOT_INITIATED: "NOT_INITIATED"
@@ -22,9 +30,52 @@ export const CardApplicationStatus = {
 /** Error codes the CLI branches on. The backend sends these in the body's `name`/`errorCode`. */
 export const BackendErrorCode = {
   ADDON_UPGRADE_REQUIRED: "ADDON_UPGRADE_REQUIRED",
-  COP_VERIFIED_WITH_FUZZY_MATCH: "COP_VERIFIED_WITH_FUZZY_MATCH"
+  COP_VERIFIED_WITH_FUZZY_MATCH: "COP_VERIFIED_WITH_FUZZY_MATCH",
+  OTP_VERIFICATION_IS_REQUIRED: "OTP_VERIFICATION_IS_REQUIRED",
+  /** Too many codes requested in an hour. Its backend copy says "incorrect code" — that copy is wrong. */
+  BANK_OTP_LIMIT_REACH: "BANK_OTP_LIMIT_REACH",
+  /** Too many wrong codes entered — the hour-long block a new code cannot clear. */
+  BANK_OTP_VERIFICATION_LIMIT_REACH: "BANK_OTP_VERIFICATION_LIMIT_REACH",
+  BANK_OTP_ONE_MINUTE_LIMIT_REACH: "BANK_OTP_ONE_MINUTE_LIMIT_REACH",
+  /** The access token itself is bad or expired — the one 401 a token refresh can actually clear. */
+  INVALID_CREDENTIAL: "INVALID_CREDENTIAL",
+  /** Valid credentials, but this endpoint hasn't opted CLI tokens in. A new login mints the same token. */
+  UNAUTHORIZED_ACCESS: "UNAUTHORIZED_ACCESS",
+  /** The signed-in user's role lacks the permission; only an Owner or Admin can grant it. */
+  ROLE_UNAUTHORIZED_ACCESS: "ROLE_UNAUTHORIZED_ACCESS",
+  /** Business is not KYB-approved. Its `title` carries the merchant status. */
+  KYB_VERIFICATION_REQUIRED: "KYB_VERIFICATION_REQUIRED"
 } as const;
 export type BackendErrorCode = (typeof BackendErrorCode)[keyof typeof BackendErrorCode];
+
+/**
+ * Refusals of access, not of credentials — a fresh login produces an identical refusal, because the
+ * credential is valid and the path is not permitted. They arrive as 401/403, so without this they
+ * read as "your session died" and the CLI advised `atoa login` in a loop that could never terminate.
+ */
+export const ACCESS_DENIED_CODES: readonly string[] = [
+  BackendErrorCode.UNAUTHORIZED_ACCESS,
+  BackendErrorCode.ROLE_UNAUTHORIZED_ACCESS,
+  BackendErrorCode.KYB_VERIFICATION_REQUIRED
+];
+
+/**
+ * Not a code, despite arriving in the code field. It is substituted whenever the API wraps an error
+ * that had none, so accepting it asserts a specificity that isn't there — and it is exactly what the
+ * non-bank OTP throttle arrives tagged with.
+ */
+export const GENERIC_BAD_REQUEST = "BAD_REQUEST";
+
+/**
+ * OTP throttles, which are "wait" not "you're unauthenticated". The bank surface tags them with a
+ * code (and answers 401); every other surface throws a bare 400 whose only marker is the wording,
+ * so the message match in mapHttpResponse is load-bearing, not belt-and-braces.
+ */
+export const OTP_THROTTLE_CODES: readonly string[] = [
+  BackendErrorCode.BANK_OTP_LIMIT_REACH,
+  BackendErrorCode.BANK_OTP_VERIFICATION_LIMIT_REACH,
+  BackendErrorCode.BANK_OTP_ONE_MINUTE_LIMIT_REACH
+];
 
 /** Addon features whose limits the plan controls. */
 export const AddonFeatureType = {

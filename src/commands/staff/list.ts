@@ -3,7 +3,7 @@ import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages, presentList} from "../../lib/list-view";
-import {projectStaff} from "./_shared";
+import {projectStaff, type StaffRow} from "./_shared";
 
 export default defineCommand({
   meta: {name: "list", description: t("cmdStaffList")},
@@ -15,7 +15,7 @@ export default defineCommand({
     }
     // Projected before display so the drill-in detail shows the same tidy shape as the summary,
     // rather than the raw record with its nested relations.
-    const rows = (await fetchAllPages(ctx, V1_ROUTES.staff.list)).map((r) => projectStaff(r as never));
+    const rows = (await fetchAllPages(ctx, V1_ROUTES.staff.list)).map((r) => projectStaff(r as StaffRow));
     await presentList(ctx, rows, {
       title: t("titleStaff"),
       line: (s) => [s["name"], s["email"], s["role"]].filter(Boolean).join("  ·  ")

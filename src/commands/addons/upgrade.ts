@@ -3,7 +3,13 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
-import {fetchCurrentPlan, fetchAvailablePlans, partitionByDirection, resolveTargetPlan} from "./_shared";
+import {
+  fetchCurrentPlan,
+  fetchAvailablePlans,
+  partitionByDirection,
+  resolveTargetPlan,
+  assertKybApprovedForUpgrade
+} from "./_shared";
 import {t} from "../../lib/i18n";
 
 type UpgradeArgs = CommonOptions & {planId?: string};
@@ -14,6 +20,10 @@ export default defineCommand({
     planId: {type: "positional", required: false, description: t("argPlanId")}
   }),
   run: runWithContext<UpgradeArgs>(async (ctx, args) => {
+    // Read-only, and runs under --dryRun as well: a preview that omits the refusal would promise
+    // an upgrade the real run rejects.
+    await assertKybApprovedForUpgrade(ctx);
+
     const [current, available] = await Promise.all([fetchCurrentPlan(ctx), fetchAvailablePlans(ctx)]);
     const currentOrder = current.addonPlan?.planOrder ?? -1;
     const {upgrades} = partitionByDirection(available.availablePlans ?? [], currentOrder);

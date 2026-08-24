@@ -8,6 +8,13 @@ import {BackendErrorCode} from "../../lib/enums";
 import {t} from "../../lib/i18n";
 import {isInteractive, renderKeyValues} from "../../lib/output";
 import {withOtp} from "../../lib/otp";
+import {resolveField} from "../../lib/prompt-field";
+import {
+  validateSortCode,
+  validateBankAccountNumber,
+  normaliseSortCode,
+  normaliseAccountNumber
+} from "../../lib/validators";
 
 type BankAddArgs = CommonOptions & {
   bankName?: string;
@@ -148,15 +155,30 @@ async function collectAccountFields(
   args: BankAddArgs,
   tty: boolean
 ): Promise<Record<string, unknown>> {
-  const required = async (flag: string | undefined, message: string, label: string): Promise<string> => {
-    const value = (flag ?? (tty ? await input({message}) : "")).trim();
-    if (!value) throw new AtoaError(t("fieldRequired", {field: label}), "validation");
-    return value;
-  };
-
   const {bankName, bankCode} = await pickBank(ctx, args, tty);
-  const sortCode = (await required(args.sortCode, t("promptSortCode"), t("labelSortCode"))).replace(/\s+/g, "");
-  const accountNumber = await required(args.accountNumber, t("promptAccountNumber"), t("labelAccountNumber"));
+
+  // Same digits-only, exact-length rule as direct-debit's account fields — shared in
+  // validators.ts so the two commands can't drift apart. Normalised on the way out: the rule
+  // accepts "12-34-56", the backend does not.
+  const sortCode = normaliseSortCode(
+    await resolveField({
+      value: args.sortCode,
+      flag: "sort-code",
+      message: t("promptSortCode"),
+      rule: validateSortCode,
+      interactive: tty
+    })
+  );
+
+  const accountNumber = normaliseAccountNumber(
+    await resolveField({
+      value: args.accountNumber,
+      flag: "account-number",
+      message: t("promptAccountNumber"),
+      rule: validateBankAccountNumber,
+      interactive: tty
+    })
+  );
 
   // Confirm the account number on interactive entry — a typo guard.
   if (tty && !args.accountNumber) {

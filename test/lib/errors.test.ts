@@ -1,5 +1,5 @@
 import {describe, it, expect, vi} from "vitest";
-import {AtoaError, exitCodeFor, mapHttpResponse, printError} from "../../src/lib/errors";
+import {AtoaError, errorCodeOf, exitCodeFor, mapHttpResponse, printError, rawErrorCodeOf} from "../../src/lib/errors";
 
 describe("AtoaError", () => {
   it("sets name and kind", () => {
@@ -85,6 +85,91 @@ describe("ADDON_UPGRADE_REQUIRED", () => {
   });
 });
 
+/**
+ * The API answers "you may not do this" with 401/403 and a code. Read by status alone they became
+ * `auth`, so the CLI printed "run `atoa login`" — which for UNAUTHORIZED_ACCESS mints an identical
+ * CLI token and fails identically, because the credential was never the problem.
+ */
+describe("access refusals are not credential failures", () => {
+  const captureStderr = (err: AtoaError): string => {
+    let out = "";
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: any) => {
+      out += chunk;
+      return true;
+    });
+    printError(err, {authMode: "jwt"});
+    spy.mockRestore();
+    return out;
+  };
+
+  it.each([
+    ["UNAUTHORIZED_ACCESS", 401, "Unauthorized"],
+    ["ROLE_UNAUTHORIZED_ACCESS", 401, "You don't have permission to do this."],
+    ["KYB_VERIFICATION_REQUIRED", 403, "Please verify your business to do this action."]
+  ])("%s is forbidden, and never advises re-authenticating", (name, status, message) => {
+    const err = mapHttpResponse(status, {name, message}, "req");
+    expect(err.kind).toBe("forbidden");
+    expect(captureStderr(err)).not.toContain("atoa login");
+  });
+
+  it("tells the user the endpoint is closed to CLI tokens, not that their session died", () => {
+    const out = captureStderr(mapHttpResponse(401, {name: "UNAUTHORIZED_ACCESS", message: "Unauthorized"}, "req"));
+    expect(out).toContain("not available to CLI tokens");
+  });
+
+  it("keeps the merchant status from `title` as detail on a KYB refusal", () => {
+    const err = mapHttpResponse(
+      403,
+      {name: "KYB_VERIFICATION_REQUIRED", message: "Please verify your business to do this action.", title: "KYB_HOLD"},
+      "req"
+    );
+    expect(err.detail).toContain("KYB_HOLD");
+    expect(err.message).toBe("Please verify your business to do this action.");
+    expect(captureStderr(err)).toContain("atoa kyb status");
+  });
+
+  it("leaves a genuine dead token as auth with the login hint", () => {
+    const err = mapHttpResponse(401, {name: "INVALID_CREDENTIAL", message: "Invalid token. Expired."}, "req");
+    expect(err.kind).toBe("auth");
+    expect(captureStderr(err)).toContain("atoa login");
+  });
+});
+
+/** Three services put the code in three different fields, and two of them put non-codes there. */
+describe("errorCodeOf", () => {
+  it("reads `customName`, which on some bodies arrives with no `name` beside it", () => {
+    expect(errorCodeOf({message: "blocked", customName: "BANK_OTP_LIMIT_REACH"})).toBe("BANK_OTP_LIMIT_REACH");
+  });
+
+  it.each([
+    ["the placeholder for an uncoded error", {name: "BAD_REQUEST"}],
+    ["a NestJS class name", {name: "HttpException"}],
+    ["a NestJS validation class name", {name: "BadRequestException"}],
+    ["an empty string", {errorCode: "   "}],
+    ["a non-object body", "nope"]
+  ])("returns undefined for %s", (_label, body) => {
+    expect(errorCodeOf(body)).toBeUndefined();
+  });
+
+  it("still prefers an explicit errorCode over the other two fields", () => {
+    expect(errorCodeOf({errorCode: "ERR_X", name: "BAD_REQUEST", customName: "ERR_Y"})).toBe("ERR_X");
+  });
+
+  // Scanning, not narrowing-the-first: a class name in `name` must not hide a real code beside it,
+  // or classification silently falls back to matching the message wording.
+  it("skips a non-code marker to reach a real one further down", () => {
+    expect(errorCodeOf({name: "CustomUnauthorized", customName: "BANK_OTP_LIMIT_REACH"})).toBe("BANK_OTP_LIMIT_REACH");
+    expect(errorCodeOf({name: "BAD_REQUEST", customName: "BANK_OTP_LIMIT_REACH"})).toBe("BANK_OTP_LIMIT_REACH");
+  });
+
+  // The replay guard reads raw and must still see the FIRST marker, whatever its shape — narrowing
+  // here would report "no code" and grant a refresh-and-replay that re-sends the request.
+  it("rawErrorCodeOf keeps a marker that errorCodeOf discards", () => {
+    expect(rawErrorCodeOf({name: "BAD_REQUEST"})).toBe("BAD_REQUEST");
+    expect(errorCodeOf({name: "BAD_REQUEST"})).toBeUndefined();
+  });
+});
+
 describe("mapHttpResponse", () => {
   it.each([
     [401, "auth"],
@@ -108,6 +193,71 @@ describe("mapHttpResponse", () => {
 
   it("falls back to HTTP N when no message in body", () => {
     expect(mapHttpResponse(503, {}, "x").message).toBe("HTTP 503");
+  });
+
+  // The API throws several different shapes for an OTP throttle: the bank surface tags a 401 with a
+  // code, every other surface throws a bare 400 carrying only the wording. Each is a "wait", not an
+  // auth failure — misclassifying any of them advises `atoa login` instead.
+  it.each([
+    [
+      "bank, 1 minute",
+      401,
+      {
+        name: "BANK_OTP_ONE_MINUTE_LIMIT_REACH",
+        message: "You have reached the maximum number of OTP requests within 60 seconds. Please try again in a minute!"
+      }
+    ],
+    [
+      "bank, wrong code too often",
+      401,
+      {
+        name: "BANK_OTP_LIMIT_REACH",
+        message: "You've entered the incorrect code too many times. Please wait 60 minutes before trying again."
+      }
+    ],
+    [
+      "bank, verification limit",
+      401,
+      {name: "BANK_OTP_VERIFICATION_LIMIT_REACH", message: "Too many failed attempts."}
+    ],
+    [
+      "non-bank, 1 hour",
+      400,
+      {message: "You have reached the maximum number of OTP requests within 1 hour. Please try again in an hour!"}
+    ],
+    [
+      "non-bank, 1 minute",
+      400,
+      {message: "You have reached the maximum number of OTP requests within 60 seconds. Please try again in a minute!"}
+    ],
+    // The wrong-code lockout, as opposed to the send throttle above. The non-bank surface carries no
+    // code at all here, so a 400 left as `validation` reads as "retype it" — which can never work.
+    [
+      "non-bank, wrong code too often",
+      400,
+      {name: "HttpException", message: "Maximum number of attempts reached. Please generate a new OTP."}
+    ],
+    [
+      "bank, hour block after wrong codes",
+      400,
+      {
+        name: "BANK_OTP_VERIFICATION_LIMIT_REACH",
+        message: "Too many failed attempts. Please try again after 60 minutes."
+      }
+    ]
+  ])("classifies an OTP throttle as rate_limit — %s", (_label, status, body) => {
+    const err = mapHttpResponse(status, body, "req");
+    expect(err.kind).toBe("rate_limit");
+    expect(exitCodeFor(err.kind)).toBe(5);
+  });
+
+  // The retryable wrong-code reply is a 400 too, and must stay `validation` — classifying it as a
+  // throttle would abandon the prompt while the user still had attempts left.
+  it.each([
+    ["attempts remain", {message: "Incorrect code used. 2 attempts remaining"}],
+    ["bank, attempts remain", {name: "BANK_INCORRECT_OTP", message: "Incorrect code used. 1 attempt remaining"}]
+  ])("keeps a retryable wrong code as validation — %s", (_label, body) => {
+    expect(mapHttpResponse(400, body, "req").kind).toBe("validation");
   });
 
   it("uses the body `name` (trimmed) as errorCode when no explicit errorCode is present", () => {

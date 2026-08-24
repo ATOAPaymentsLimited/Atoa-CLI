@@ -115,12 +115,15 @@ atoa login (browser)
       │
       ├─► JWT access token  ──► account-management commands (v1 API)
       │   JWT refresh token      business, sessions, keys, staff, roles,
-      │                          kyb, payment-links, bank, stores get/link-bank/image
+      │                          kyb, payment-links, bank, stores,
+      │                          addons, comms, custom-branding,
+      │                          custom-sms, direct-debit
       │
       └─► SDK API key (optional, via `atoa keys create`)
               ──► payments/data commands (legacy API)
                   payments, refunds, customers, card-on-file,
-                  webhooks, bank-feed, payouts, institutions
+                  webhooks, bank-feed, payouts, institutions,
+                  get, post, delete
 ```
 
 A single `atoa login` always mints a JWT pair. The SDK key is optional and can be added at any time with `atoa keys create`.
@@ -136,9 +139,9 @@ Credentials live in two owner-only (`0600`) JSON files under `~/.atoa/auth/`:
 
 | Auth required | Commands |
 |---|---|
-| **JWT (browser login)** | `business list/use`, `sessions list/revoke`, `keys create/list`, `kyb status/link`, `staff list/invite`, `roles list`, `payment-links create/get/delete`, `bank list/get/add/delete`, `stores get/link-bank/image` |
-| **SDK key** (`atoa keys create`) | `payments *`, `refunds *`, `customers *`, `payment-methods *`, `card-on-file *`, `webhooks *`, `bank-feed *`, `payouts *`, `stores list`, `institutions list` |
-| **Either** | `whoami`, `get`, `post`, `delete`, `keys revoke/regenerate` |
+| **JWT (browser login)** | `business list/use`, `sessions list/revoke`, `keys create/list`, `kyb status/link`, `kyb card status/link`, `staff *`, `roles *`, `payment-links create/get/delete`, `bank list/get/add/delete`, `stores *`, `addons *`, `comms list/set`, `custom-branding get/set/reset`, `custom-sms list/set/delete`, `direct-debit status/setup` |
+| **SDK key** (`atoa keys create`) | `payments *`, `refunds *`, `customers *`, `payment-methods *`, `card-on-file *`, `webhooks *`, `bank-feed *`, `payouts *`, `institutions list`, `get`, `post`, `delete` |
+| **Either** | `whoami`, `keys revoke/regenerate` |
 | **None** (self-authenticating) | `signup` (creates the account + session itself), `completion`, `profile *`, `reset` |
 
 Commands that require JWT will error with a clear message when the active profile has only an SDK key and no JWT session. Run `atoa login` (browser) to gain a JWT session; mint an SDK key with `atoa keys create` when you need the SDK/data commands.
@@ -170,21 +173,33 @@ atoa keys list                          # list SDK keys for this account (never 
 
 ```bash
 atoa kyb status                         # get the KYB verification status for this business
-atoa kyb link                           # print the KYB dashboard deep-link
-atoa kyb link --open                    # also open the URL in the default browser
+atoa kyb link                           # open the KYB form in the browser (prints the URL too)
+atoa kyb card status                    # card-payment application status + what blocks it
+atoa kyb card link                      # open the card-payment application form
 ```
 
 ### Staff and roles (`staff`, `roles`)
 
+`staff add` and `staff invite` are the same command under two names. Omit the identifier on a
+TTY and the CLI prompts, prefilled with the record's current values.
+
 ```bash
 atoa staff list                         # list staff members for this business
-atoa staff invite \
+atoa staff add \
   --firstName Alice --lastName Smith \
   --email alice@example.com \
-  --role <roleId>                       # invite a new staff member
-atoa staff invite … --store <storeId>   # restrict to one or more stores (repeatable flag)
+  --role <roleId>                       # add a new staff member
+atoa staff add … --store <storeId>      # restrict to one or more stores (repeatable flag)
+atoa staff update <userId>              # edit name, email, phone, role or permitted stores
+atoa staff delete <userId> --yes        # remove a staff member from the business
 atoa roles list                         # list available roles for this business
+atoa roles add --name "Shift lead"      # create a role; prompts for permissions
+atoa roles update <roleId>              # edit name, description or permissions
+atoa roles delete <roleId> --yes        # delete a role
 ```
+
+Permissions can depend on other permissions. Selecting one automatically grants what it
+requires, and the CLI prints which extras it added.
 
 ### Bank accounts (`bank`)
 
@@ -208,14 +223,64 @@ atoa payment-links get <linkId> --store-id <id>                           # fetc
 atoa payment-links delete <linkId> --store-id <id>                        # delete a link
 ```
 
-### Stores — new subcommands (`stores get`, `stores link-bank`, `stores image`)
-
-These extend the existing `stores list` command (which uses the legacy SDK key).
+### Stores (`stores`)
 
 ```bash
-atoa stores get <storeId>               # get a store by ID (jwt mode only)
+atoa stores list                        # list stores for this business
+atoa stores get <storeId>               # get a store by ID
+atoa stores add                         # interactive: name, address, postcode
+atoa stores add --locationName "Soho" --addressLine1 "12 Dean St" \
+  --cityOrTown London --addressPostalCode W1D3RP
+atoa stores update <storeId>            # prompts with the store's current values prefilled
 atoa stores link-bank <storeId> --bank <bankAccountId>  # link a bank account to a store
 atoa stores image ./logo.png --storeId <storeId>        # upload/replace store logo (PNG/JPG, ≤6MB)
+```
+
+### Add-on plans (`addons`)
+
+```bash
+atoa addons list                        # current plan, feature usage, available moves
+atoa addons upgrade                     # pick a plan on a TTY, or pass a plan ID
+atoa addons downgrade <planId>          # refused while usage exceeds the target plan
+atoa addons cancel-downgrade            # cancel a downgrade that hasn't taken effect
+```
+
+A refused downgrade names the features that are over the target plan's limits, so you know
+what to reduce before retrying.
+
+### Direct Debit (`direct-debit`)
+
+A business can hold one mandate. Once it's active, `setup` refuses rather than creating a second.
+
+```bash
+atoa direct-debit status                # whether a mandate exists, and its status
+atoa direct-debit setup                 # interactive: bank details + billing address
+```
+
+Interactive setup prefills the account holder name, email and billing address already held on
+the business, and masks the account number on file — press Enter to keep it.
+
+### Notification preferences (`comms`)
+
+```bash
+atoa comms list                         # topics, with each channel's state
+atoa comms set payouts --email off      # topic ID or display name
+atoa comms set <topicId> --sms on --push off
+```
+
+Each channel reads `on`, `off`, or `unavailable` — Atoa doesn't send every channel for every
+topic, and an unavailable channel can't be switched on.
+
+### Checkout branding and SMS sender name (`custom-branding`, `custom-sms`)
+
+```bash
+atoa custom-branding get                # current checkout theme colour
+atoa custom-branding set '#FF0000'      # 6-digit hex
+atoa custom-branding reset              # restore the Atoa default
+
+atoa custom-sms list                    # sender name and its review status
+atoa custom-sms set AcmeLtd             # request a sender name (letters and numbers only)
+atoa custom-sms delete --yes            # remove the custom sender name
 ```
 
 ### Merchant onboarding (`signup`)
@@ -224,8 +289,9 @@ atoa stores image ./logo.png --storeId <storeId>        # upload/replace store l
 
 ```bash
 atoa signup                             # interactive: email + OTP, then guided onboarding
-atoa signup --from-step 2               # resume from step N (2-4; businessId must already be set)
-atoa signup --skip-extras               # skip the optional final step and finalise immediately
+atoa signup --email you@example.com     # skip the email prompt
+atoa signup --fromStep 2                # resume from step N (2-3); businessId must already be set
+atoa signup --deviceName "Work laptop"  # label this device in your Atoa sessions
 ```
 
 ---
@@ -369,7 +435,8 @@ atoa keys regenerate --env production --yes
 
 ### Generic HTTP verbs (escape hatch)
 
-For endpoints the CLI doesn't yet wrap, or when you want explicit control:
+For endpoints the CLI doesn't yet wrap, or when you want explicit control. These authenticate
+with the **SDK key**, so `atoa keys create` must have been run first:
 
 ```bash
 atoa get /api/payments/stores

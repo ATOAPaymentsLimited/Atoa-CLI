@@ -5,6 +5,76 @@ All notable changes to the Atoa CLI are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-20
+
+Business-settings commands, in-place editing, and table output by default.
+
+### Added
+
+- **Add-on plans** (`atoa addons`): `list` shows the current plan, feature usage and the plans you
+  can move to; `upgrade`, `downgrade` and `cancel-downgrade` change it. A refused downgrade names
+  the features that exceed the target plan's limits.
+- **Direct Debit** (`atoa direct-debit`): `status` and `setup` for the subscription mandate. A
+  business can hold one mandate — `setup` refuses rather than creating a second.
+- **Notification preferences** (`atoa comms`): `list` shows each topic with its per-channel state;
+  `set <topic> --email|--sms|--push on|off` toggles them.
+- **Checkout branding** (`atoa custom-branding get/set/reset`) and **SMS sender name**
+  (`atoa custom-sms list/set/delete`).
+- **Card-payment activation status** (`atoa kyb card status`, `atoa kyb card link`), including what
+  is blocking activation when verification hasn't passed.
+- **Full staff, role and store management**: `staff add/update/delete`, `roles add/update/delete`,
+  `stores add/update`.
+- **In-place editing**: run an `update` command on a terminal and every field is offered with its
+  current value already filled in — press Enter to keep it, type over it to change it.
+- **Permission prerequisites**: selecting a permission that depends on others grants them
+  automatically and prints which extras were added.
+
+### Changed
+
+- **Default output is a table.** Values that don't fit wrap inside their cell rather than being
+  truncated, and an empty value shows as `N/A`. `--output json|yaml` is unchanged.
+- **List output is projected, not raw.** `staff`, `roles`, `stores` and `comms` return readable
+  columns instead of nested records — roles show permission names, staff show their permitted
+  store names, and comms shows one column per channel.
+- **`atoa get`, `atoa post` and `atoa delete` authenticate with the SDK key**, not the browser
+  session. Run `atoa keys create` before using them.
+- **`atoa branding` is now `atoa custom-branding`**, and **`atoa sms` is now `atoa custom-sms`**.
+- **`atoa staff invite` is an alias of `atoa staff add`** — one implementation behind both names,
+  so they validate and prompt identically.
+- Field validation and error messages now match the merchant dashboard.
+
+### Removed
+
+- **`atoa google-review`**.
+- **`atoa kyb card submit`** — card activation is read-only from the CLI; apply via
+  `atoa kyb card link`.
+- **`--open` on `atoa kyb link`** — the command now always opens the browser, and still prints
+  the URL so there is a fallback when no browser can be launched.
+
+### Fixed
+
+- An add-on plan limit (HTTP 403) was reported as an authentication failure telling you to run
+  `atoa login`. It now exits with its own code (8) and points at `atoa addons`.
+- `atoa staff delete` removed the wrong record for some accounts.
+- The browser failed to open on Windows for `atoa login` and the KYB deep-links; the URL was
+  printed but never navigated to.
+- Long values such as IDs were silently truncated in table output.
+- **`atoa bank add` sent two OTPs per run.** The bank endpoint answers 401 for business outcomes —
+  OTP required, wrong code, throttled — and each was mistaken for an expired token, refreshed and
+  replayed, re-sending the request. Against a two-per-minute allowance that made the command
+  unusable: it reported "maximum number of OTP requests" before ever prompting for a code.
+- A mistyped OTP allowed one attempt instead of five, and reported the typo as an authentication
+  failure advising `atoa login`. The bank flow rejects a bad code with 401 where onboarding uses
+  400, and only 400 was treated as retryable.
+- `atoa direct-debit setup` never prefilled the billing address. It read `businessInfo` one level
+  too high in the response, which silently yielded nothing.
+- `atoa bank list` and `atoa bank get` printed the full account number, and the IBAN containing
+  it, whenever output was piped or `--output` was given. Both now show only the masked number.
+- `atoa addons list` now shows usage against the plan's limit (`1 / 1`, `(unlimited)`,
+  `(not in this plan)`), so a plan-limit refusal can be understood without guesswork.
+
+[0.3.0]: https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/tag/v0.3.0
+
 ## [0.2.0] - 2026-06-29
 
 Browser-based JWT login and the v1 account-management command set.

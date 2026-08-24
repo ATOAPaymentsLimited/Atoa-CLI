@@ -149,7 +149,7 @@ export default defineCommand({
     }
 
     const {data} = await ctx.http.request({...V1_ROUTES.staff.update, pathParams: {userId}, body});
-    ctx.print(projectStaff((data ?? {}) as never));
+    ctx.print(projectStaff((data ?? {}) as StaffRow));
   })
 });
 

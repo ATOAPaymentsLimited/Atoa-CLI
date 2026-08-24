@@ -105,7 +105,7 @@ function announce({ids, added}: {ids: string[]; added: string[]}): string[] {
   return ids;
 }
 
-interface RoleRow {
+export interface RoleRow {
   id?: string;
   name?: string;
   description?: string;

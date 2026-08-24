@@ -16,7 +16,7 @@ export function parseRepeatedFlag(rawArgs: string[], flag: string): string[] {
   return out;
 }
 
-interface StaffRow {
+export interface StaffRow {
   id?: string;
   userType?: string;
   twoFactorEnabled?: boolean;

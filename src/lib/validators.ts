@@ -1,11 +1,48 @@
 // Signup/registration field validators
 
 import {t} from "./i18n";
+import {DEFAULT_STORE_NAME} from "./constants";
 
 const NAME_RE = /^[a-zA-Z'\s]+$/;
 export const EMAIL_RE = /^([-+_0-9a-zA-Z]+(?:\.?[-+_0-9a-zA-Z])*)@((?:[0-9a-zA-Z][-\w]*\.)+[a-zA-Z0-9]{2,10})$/;
 
 export const isValidEmail = (email: string): boolean => email.length <= 110 && EMAIL_RE.test(email);
+
+/**
+ * Sort codes are printed as "12-34-56" and account numbers are often typed with spaces, so both
+ * are normalised before validating — and callers must send the normalised form.
+ */
+export const normaliseSortCode = (v: string | undefined): string => (v ?? "").replace(/[\s-]/g, "");
+export const normaliseAccountNumber = (v: string | undefined): string => (v ?? "").replace(/\s+/g, "");
+
+/** Last four digits only — terminal output ends up in scrollback, CI logs and screenshots. */
+export const maskAccountNumber = (full: string | undefined): string | undefined => {
+  const s = full?.trim();
+  return s && s.length >= 4 ? `••••${s.slice(-4)}` : undefined;
+};
+
+/** Wrong characters and wrong length are different mistakes — "12jjjjjj" is 8 chars, just not digits. */
+const digitsOfLength =
+  (length: number, normalise: (v: string) => string, wrongChars: string, wrongLength: string) =>
+  (v: string): true | string => {
+    const s = normalise(v);
+    if (!/^\d*$/.test(s)) return wrongChars;
+    return s.length === length || wrongLength;
+  };
+
+/** Shared by `bank add` and `direct-debit setup` so the two can't drift onto different rules. */
+export const validateBankAccountNumber = digitsOfLength(
+  8,
+  normaliseAccountNumber,
+  t("bankAccountNumberDigitsError"),
+  t("bankAccountNumberLengthError")
+);
+export const validateSortCode = digitsOfLength(
+  6,
+  normaliseSortCode,
+  t("sortCodeDigitsErrorMsg"),
+  t("sortCodeLengthErrorMsg")
+);
 
 export const validateName =
   (label: string) =>
@@ -80,7 +117,7 @@ export const validateStoreName = (v: string): true | string => {
   )(v);
   if (base !== true) return base;
   // The business's own store is named "Default"; reusing the name collides with it.
-  return (v ?? "").trim().toLowerCase() !== "default" || t("defaultLocationNameErrMsg");
+  return (v ?? "").trim().toUpperCase() !== DEFAULT_STORE_NAME || t("defaultLocationNameErrMsg");
 };
 
 export const validateStoreAddressLine1 = storeText(

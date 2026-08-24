@@ -2,16 +2,14 @@ import {input} from "@inquirer/prompts";
 import type {HttpClient} from "./http";
 import type {V1Route} from "./v1-routes";
 import {AtoaError} from "./errors";
+import {BackendErrorCode} from "./enums";
 
 /**
- * Stable backend code signalling "OTP sent — resubmit the same body with `otp` populated".
- * The backend i18n value carries a trailing space ("OTP_VERIFICATION_IS_REQUIRED "); the http
- * layer's mapHttpResponse already trims it, so this exact string is what surfaces as errorCode.
- *
- * NOTE the status differs by surface: onboarding raises it as 400, the bank flow as 401
- * (CustomUnauthorized). We therefore branch on the CODE, never the status.
+ * "OTP sent — resubmit the same body with `otp` populated". The backend i18n value carries a
+ * trailing space; mapHttpResponse trims it, so this is what surfaces as errorCode. Status differs
+ * by surface (onboarding 400, bank 401), so branch on the CODE, never the status.
  */
-export const OTP_REQUIRED_CODE = "OTP_VERIFICATION_IS_REQUIRED";
+export const OTP_REQUIRED_CODE = BackendErrorCode.OTP_VERIFICATION_IS_REQUIRED;
 
 export interface WithOtpOptions {
   /** Route for the first (no-otp) attempt. */
@@ -73,7 +71,8 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
       return {data: res.data, otpUsed: true};
     } catch (err) {
       const ae = err as AtoaError;
-      if (ae.status === 429) {
+      // Keyed on kind, not status: the bank surface throttles with a 401, not a 429.
+      if (ae.kind === "rate_limit" || ae.status === 429) {
         throw new AtoaError(
           `OTP rate limit reached${ae.message ? ": " + ae.message : ""}. Please wait before trying again.`,
           "rate_limit",
@@ -95,13 +94,16 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
           return {data: res.data, otpUsed: true};
         }
       }
-      // 400 = wrong/expired OTP — retry while attempts remain, otherwise give up. The backend
-      // supplies the precise reason + remaining count (wrong code / expired / N left), so surface it.
-      if (ae.status === 400 && attempt < maxAttempts) {
+      // Wrong/expired code — retry while attempts remain. Status differs by surface: onboarding
+      // answers 400, the bank flow 401 (CustomUnauthorized). INVALID_CREDENTIAL is excluded: that
+      // 401 is a dead access token, and re-prompting spends OTP attempts no retype can fix.
+      const wrongCode =
+        ae.status === 400 || (ae.status === 401 && ae.errorCode !== BackendErrorCode.INVALID_CREDENTIAL);
+      if (wrongCode && attempt < maxAttempts) {
         process.stderr.write(`${ae.message}\n`);
         continue;
       }
-      if (ae.status === 400) {
+      if (wrongCode) {
         throw new AtoaError(ae.message || "Too many incorrect OTP attempts.", "validation", {
           status: ae.status,
           requestId: ae.requestId

@@ -219,6 +219,62 @@ describe("jwt 401 → refresh → replay", () => {
     expect(jwt.setCalls).toEqual([{accessToken: "jwt-access-2", refreshToken: "jwt-refresh-2"}]);
   });
 
+  // An expired token is reported with a code too — `{"name":"INVALID_CREDENTIAL","message":"Invalid
+  // token. Expired."}` — so the replay guard must not simply skip every coded 401, or silent
+  // refresh stops working and every expiry becomes a manual `atoa login`.
+  it("still refreshes and replays when the token is reported expired by code", async () => {
+    undiciMock.fetch
+      .mockResolvedValueOnce(jsonResponse(401, {name: "INVALID_CREDENTIAL", message: "Invalid token. Expired."}))
+      .mockResolvedValueOnce(jsonResponse(200, {accessToken: "jwt-access-2", refreshToken: "jwt-refresh-2"}))
+      .mockResolvedValueOnce(jsonResponse(200, {id: "me"}));
+
+    const jwt = fakeJwtSession();
+    const res = await client(jwt.session).request({method: "GET", path: "/api/v1/identity", auth: "jwt"});
+
+    expect(res.status).toBe(200);
+    expect(undiciMock.fetch).toHaveBeenCalledTimes(3);
+    expect(jwt.setCalls).toEqual([{accessToken: "jwt-access-2", refreshToken: "jwt-refresh-2"}]);
+  });
+
+  // The bank flow answers 401 for business outcomes, not just expiry, and each one has already
+  // done work: sent a code, burnt an attempt, or tripped the throttle. Replaying any of them
+  // re-sends the request.
+  it.each([
+    ["an OTP challenge", "OTP_VERIFICATION_IS_REQUIRED"],
+    ["a wrong OTP", "BANK_OTP_VERIFICATION_FAILED"],
+    ["the OTP rate limit", "BANK_OTP_ONE_MINUTE_LIMIT_REACH"]
+  ])("does NOT refresh-and-replay %s", async (_label, name) => {
+    undiciMock.fetch.mockResolvedValueOnce(jsonResponse(401, {message: "business outcome", name}));
+
+    const jwt = fakeJwtSession();
+    await expect(
+      client(jwt.session).request({method: "POST", path: "/api/business/:businessId/bank/", auth: "jwt", body: {}})
+    ).rejects.toMatchObject({errorCode: name});
+
+    // One call only: no refresh, no replay, so nothing was re-sent.
+    expect(undiciMock.fetch).toHaveBeenCalledTimes(1);
+    expect(jwt.setCalls).toEqual([]);
+  });
+
+  // The replay guard grants refresh on the ABSENCE of a code, so it must read the field raw. These
+  // two markers are deliberately discarded for classification — BAD_REQUEST is substituted when the
+  // API wraps an uncoded error, and some error bodies omit `name` and carry only `customName`.
+  // Narrowing them to undefined here would read as "no code" and re-send the OTP.
+  it.each([
+    ["the BAD_REQUEST wrapper around an OTP error", {name: "BAD_REQUEST"}],
+    ["a code carried only in customName", {customName: "BANK_OTP_LIMIT_REACH"}]
+  ])("does NOT refresh-and-replay %s", async (_label, body) => {
+    undiciMock.fetch.mockResolvedValueOnce(jsonResponse(401, {message: "business outcome", ...body}));
+
+    const jwt = fakeJwtSession();
+    await expect(
+      client(jwt.session).request({method: "POST", path: "/api/business/:businessId/bank/", auth: "jwt", body: {}})
+    ).rejects.toThrow();
+
+    expect(undiciMock.fetch).toHaveBeenCalledTimes(1);
+    expect(jwt.setCalls).toEqual([]);
+  });
+
   it("the replay reuses the original Idempotency-Key (same logical write)", async () => {
     undiciMock.fetch
       .mockResolvedValueOnce(jsonResponse(401, {}))

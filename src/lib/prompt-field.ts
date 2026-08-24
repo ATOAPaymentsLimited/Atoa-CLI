@@ -20,7 +20,14 @@ export interface ResolveFieldOptions {
 /**
  * Resolves one field from a flag or a prompt, validating both the same way. An invalid flag is
  * re-asked on a TTY rather than aborting; with nobody to ask it fails instead of hanging.
+ *
+ * A required field either returns a value or throws, so it resolves to `string` — callers don't
+ * need a follow-up emptiness check that can never fire.
  */
+export async function resolveField(opts: ResolveFieldOptions & {optional?: false}): Promise<string>;
+export async function resolveField(opts: ResolveFieldOptions & {optional: true}): Promise<string | undefined>;
+// Callers that decide `optional` at runtime get the union, as before.
+export async function resolveField(opts: ResolveFieldOptions): Promise<string | undefined>;
 export async function resolveField(opts: ResolveFieldOptions): Promise<string | undefined> {
   const supplied = opts.value?.trim();
 
