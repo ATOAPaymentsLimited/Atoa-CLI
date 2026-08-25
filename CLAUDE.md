@@ -82,8 +82,49 @@ atoa direct-debit status         atoa sessions list
 atoa keys list                   atoa institutions list
 atoa webhooks list               atoa payouts list
 atoa payments transactions       atoa customers list
+atoa customers get <id>          atoa payments status <id>
+atoa payouts transactions <id>   atoa bank-feed accounts <accountAuthId>
+atoa bank-feed account <id>      atoa bank-feed balance <id>
+atoa payment-methods get <id> --customer <customerId>
+atoa bank-feed transactions <id> --from <ISO> --before <ISO>
 atoa refunds list --paymentRequestId <id>
 ```
+
+`payments status` also takes `--poll`, which loops every 5 seconds for up to **3 minutes** waiting
+for a non-PENDING status, printing nothing until it resolves or times out. Don't use it — run the
+plain command again when you want a fresh reading.
+
+## Getting a link to give the user
+
+`kyb link` and `kyb card link` open a browser at a dashboard page. You have no browser, so add
+`--dryRun` — it prints the URL and opens nothing:
+
+```
+atoa kyb link --dryRun --output json
+#   → {"url": "https://…/verification?merchantId=…"}
+atoa kyb card link --dryRun --output json
+#   → {"url": "https://…/card-signup?merchantId=…"}
+```
+
+Show the user the URL and ask them to open it. Without `--dryRun` the command tries to launch a
+browser on the machine the CLI is running on, which is not where the user is looking.
+
+**Which one:** for a merchant who hasn't been verified yet, use **`kyb link`** — card activation is
+part of that same wizard. **`kyb card link`** is only for a merchant who is *already* KYB-verified
+and wants to add card payments afterwards.
+
+**Check the status before handing over a card link.** `--dryRun` prints the URL without contacting
+the API, which means it also skips the precondition the browser path enforces. `/card-signup`
+silently redirects a merchant who hasn't submitted KYB to `/home`, so the link looks broken to them
+while your command exited 0. Run `atoa kyb status --output json` first and only pass the card link
+on once KYB has been submitted and not rejected.
+
+Both commands need an active business. Without one they exit **3** (not 7, despite the table) —
+fix it with `atoa business use <id>`; you do not need `atoa login` unless the profile has no
+session at all.
+
+Verification itself happens in the browser — no CLI command completes it. Poll
+`atoa kyb status --output json` afterwards to see whether it went through.
 
 ---
 
@@ -300,4 +341,34 @@ same command **without `--otp`** — it resumes from where it stopped.
 
 ## Hand this one back
 
-`atoa login` opens a browser and cannot be scripted. Tell the user to run it, then continue.
+The test is not "does it destroy something" — you run deletes all the time, following the workflow
+above. The test is **does the damage escape this conversation**: another machine, CI, the merchant's
+live systems, real money, or a session only the user can restore. Those you do not run, whatever
+flags are available.
+
+Show the user the exact command, ask them to run it, and continue from what they report.
+
+- **`atoa login`** — opens a browser and cannot be scripted.
+- **`atoa reset`** — deletes every profile and stored token, **both environments**, not just the
+  active one. `--revoke` additionally revokes SDK keys server-side, including production, which
+  cannot be undone and breaks CI or anyone else holding that key. `atoa reset --dryRun` is safe and
+  prints exactly what would be cleared — show them that, then let them decide. It has **no
+  `--output` flag**, so without `--yes` it opens a prompt you cannot answer.
+- **`atoa logout`** — revokes the refresh token and ends the session. Only `atoa login` restores it,
+  and you cannot run that, so this strands you. Its `--revoke` flag is a no-op kept for script
+  compatibility and is **not** the same as `reset --revoke`, which revokes SDK keys server-side;
+  `--purge-key` deletes the profile's stored SDK keys locally only.
+- **`atoa sessions revoke`** — may revoke the session this CLI is using, with the same consequence.
+  It also checks `--yes` *before* `--dryRun`, so you cannot preview it: `sessions revoke <id>
+  --dryRun` fails asking for `--yes`.
+- **`atoa card-on-file capture`** — takes the money. A capture is the payment, not a rehearsal.
+- **`atoa webhooks trigger`** — sends a real webhook to the merchant's live callback URL, with
+  `--orderId`, `--amount` and `--status` all overridable. Their system treats whatever you dispatch
+  as a genuine event.
+- **`atoa bank-feed revoke`** — ends a bank consent. Re-establishing it needs the merchant at their
+  bank; there is no CLI command that undoes it.
+
+That list is closed. **Everything else that changes or deletes** — including `bank delete`,
+`roles delete`, `staff delete`, `payment-links delete`, `customers delete`, `keys revoke` — follows
+"How to run a write": propose it, `--dryRun` it, get agreement, then run it with `--yes`. Do not
+hand those back.
