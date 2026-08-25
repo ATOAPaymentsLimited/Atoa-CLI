@@ -5,6 +5,57 @@ All notable changes to the Atoa CLI are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Accurate failure reporting, and `signup` / `bank add` runnable without a terminal.
+
+### Added
+
+- **A flag for every prompted value on `signup`**, so it can run with no terminal: `--otp`,
+  `--accept-terms`, `--marketing`, `--start-new`, and one for each onboarding field. It runs as two
+  invocations — the first sends the one-time code, the second carries it plus every value.
+  Interactive use is unchanged.
+- **`--otp` on `bank add`**, for the code required when adding a second account.
+- **Exit code `9`** — a one-time code was sent and nothing was written. Distinct from success
+  (`signup` previously reported `0`, claiming an account existed when none did) and from invalid
+  input (`bank add` previously reported `3`, sending callers hunting for a bad flag).
+- `--start-new` on `signup`, to create a second business rather than resuming an existing one.
+  Without it, an unattended re-run resumes or reports "Nothing to do" — it never creates one by
+  itself.
+
+### Fixed
+
+- **Access refusals no longer advise re-authenticating.** `UNAUTHORIZED_ACCESS`,
+  `ROLE_UNAUTHORIZED_ACCESS` and `KYB_VERIFICATION_REQUIRED` arrive as 401/403 but refuse the
+  access, not the credential; the CLI advised `atoa login`, which for the first mints an identical
+  token and fails identically.
+- **OTP throttles are reported as rate limits, not auth failures.** The wrong-code lockout was
+  treated as a retryable typo, so the CLI re-prompted for a code that could never be accepted,
+  spending the remaining attempts.
+- **A sign-in cooldown is reported as a rate limit, not an auth failure.** After repeated failed
+  attempts the backend locks sign-in and answers 401; the CLI printed "run `atoa login`" underneath
+  a message saying to wait N seconds — recommending the exact action that caused the lockout. This
+  is a distinct failure mode from the OTP throttles, and is now matched by its error code rather
+  than by its wording.
+- **A 401 answered after the backend had already acted is no longer replayed**, which was sending a
+  second one-time code.
+- **`--otp` no longer triggers a fresh code before submitting.** The initial probe request is what
+  makes the backend send one, so the supplied code was invalidated before use — and on production,
+  where codes are random, it would have failed every time.
+- An expired OTP is no longer retried: expiry is only raised for a code that matched, so retyping
+  it re-fails identically.
+- Re-running `signup` against a fully-onboarded business no longer waits on a prompt that cannot be
+  answered without a terminal.
+- An unrecognised `--output` value now exits `3` rather than `1`.
+- `--industry`, `--monthly-turnover` and `--business-structure` accept the option's name, and an
+  unmatched value lists every valid option instead of failing opaquely.
+
+### Documentation
+
+- Exit codes `7`, `8` and `9` added to the README table (`7` and `8` were missing).
+- Corrected the `custom-sms` sender-name rule: 3–11 characters, letters, numbers **and spaces** —
+  it was documented as letters and numbers only.
+
 ## [0.3.0] - 2026-08-20
 
 Business-settings commands, in-place editing, and table output by default.

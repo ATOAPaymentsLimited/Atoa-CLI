@@ -208,6 +208,12 @@ atoa bank list                          # list bank accounts for the active busi
 atoa bank add                           # interactive: pick bank, enter details, verify via OTP
 atoa bank add --sortCode 040004 --accountNumber 12345678 \
   --accountHolderName "Acme Ltd" --setPrimary
+
+# Non-interactive. Adding a SECOND account needs a one-time code, so this is two runs:
+atoa bank add --bankName "Acme Bank" --sortCode 040004 \
+  --accountNumber 12345678 --accountHolderName "Acme Ltd" --output json
+#   → exit 9: "An OTP was sent to your registered contact. Re-run with --otp <code>"
+atoa bank add ...same flags... --otp 123456 --output json    # → exit 0
 atoa bank get <bankAccountId>           # get a bank account by id
 atoa bank delete <bankAccountId> --yes  # remove a bank account
 ```
@@ -279,7 +285,7 @@ atoa custom-branding set '#FF0000'      # 6-digit hex
 atoa custom-branding reset              # restore the Atoa default
 
 atoa custom-sms list                    # sender name and its review status
-atoa custom-sms set AcmeLtd             # request a sender name (letters and numbers only)
+atoa custom-sms set AcmeLtd             # request a sender name (3-11 chars; letters, numbers, spaces)
 atoa custom-sms delete --yes            # remove the custom sender name
 ```
 
@@ -293,6 +299,28 @@ atoa signup --email you@example.com     # skip the email prompt
 atoa signup --fromStep 2                # resume from step N (2-3); businessId must already be set
 atoa signup --deviceName "Work laptop"  # label this device in your Atoa sessions
 ```
+
+Every prompted value also has a flag, so signup can run with no terminal at all. The one-time code
+goes to your inbox, so it takes two runs:
+
+```bash
+atoa signup --email you@example.com --output json
+#   → exit 9: "An OTP has been sent to you@example.com."
+
+atoa signup --email you@example.com --otp 123456 --accept-terms \
+  --business-name "Acme Ltd" --industry "Retail - Other" \
+  --monthly-turnover "Up to £10,000" --business-structure "Limited Company" \
+  --vat-number 123456789 --first-name Ada --last-name Lovelace \
+  --postal-code "SW1A 2AA" --address-line1 "10 Downing Street" --output json
+```
+
+`--accept-terms` records acceptance of the [Privacy Policy](https://paywithatoa.co.uk/atoa-business-privacy-policy/)
+and [Terms of Service](https://paywithatoa.co.uk/terms/); `--marketing` is a separate opt-in.
+`--start-new` creates a second business rather than resuming an existing signup.
+
+`--business-structure` is `Limited Company` or `Charity`. `--industry` and `--monthly-turnover` are
+server-defined lists that vary by environment, so the values above are illustrative — pass the
+option's name and, if it doesn't match, the CLI exits `3` listing every valid one to choose from.
 
 ---
 
@@ -550,6 +578,9 @@ The CLI uses POSIX-style exit codes so shell pipelines and CI systems can branch
 | `4` | Not found | HTTP 404 — resource doesn't exist on this env |
 | `5` | Rate limited | HTTP 429 — back off and retry |
 | `6` | Network / TLS / DNS | Couldn't reach the server (connection refused, DNS, cert expired, timeout) |
+| `7` | Business not selected | The account belongs to several businesses and none is active — run `atoa business use <id>` |
+| `8` | Plan limit | The add-on plan doesn't allow this — `atoa addons list` shows the limits |
+| `9` | One-time code sent | Not a failure: a code was sent and nothing was written. Re-run the same command with `--otp <code>` |
 
 Example CI pattern:
 

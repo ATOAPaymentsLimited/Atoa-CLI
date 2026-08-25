@@ -76,6 +76,26 @@ describe("withOtp", () => {
     expect(prompt).toHaveBeenCalledTimes(1); // not re-prompted
   });
 
+  // A supplied code gets exactly one attempt. There is nobody to retype it, so looping would just
+  // spend the backend's wrong-attempt budget on the same wrong value; re-running is the retry.
+  it("does not retry a wrong code supplied via --otp", async () => {
+    const wrong = {
+      throw: new AtoaError("Incorrect code used. 3 attempts remaining", "auth", {
+        status: 401,
+        errorCode: "BANK_INCORRECT_OTP"
+      })
+    };
+    const {http, calls} = fakeHttp([wrong, wrong, wrong]);
+    const prompt = vi.fn(async () => "999999");
+
+    await expect(
+      withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, otp: "340820", promptOtp: prompt})
+    ).rejects.toMatchObject({kind: "validation"});
+
+    expect(prompt).not.toHaveBeenCalled(); // never asks — there is no one to ask
+    expect(calls).toHaveLength(1); // one submit, no probe and no retry
+  });
+
   it("stops on an expired code instead of re-prompting four more times", async () => {
     // Expiry is raised only for a code that matched, so retyping it re-fails identically. The
     // outcome was always correct; this is about not asking five times to say the same thing.
