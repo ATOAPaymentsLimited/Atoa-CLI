@@ -30,6 +30,7 @@ describe("exitCodeFor", () => {
     ["rate_limit", 5],
     ["network", 6],
     ["plan_limit", 8],
+    ["otp_required", 9],
     ["generic", 1],
     [undefined, 1]
   ] as const)("%s → %d", (kind, code) => {

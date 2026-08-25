@@ -9,10 +9,15 @@ vi.mock("@inquirer/prompts", () => ({
 
 const mock = vi.hoisted(() => {
   const requests: Array<{method: string; path: string; body?: any}> = [];
+  let otpRequired = false;
   return {
     requests,
+    requireOtp() {
+      otpRequired = true;
+    },
     reset() {
       requests.length = 0;
+      otpRequired = false;
     },
     buildContext: async (opts: any) => ({
       env: "sandbox",
@@ -21,6 +26,15 @@ const mock = vi.hoisted(() => {
         request: async (req: any) => {
           requests.push({method: req.method, path: req.path, body: req.body});
           if (req.path === "/api/business/:businessId/bank/" && req.method === "POST") {
+            // The bank surface answers "OTP required" only until a code is supplied.
+            if (otpRequired && !(req.body && "otp" in req.body)) {
+              const {AtoaError} = await import("../../src/lib/errors");
+              throw new AtoaError("OTP required", "validation", {
+                status: 401,
+                errorCode: "OTP_VERIFICATION_IS_REQUIRED",
+                requestId: "r"
+              });
+            }
             return {status: 200, data: {id: "bank_new", bankName: req.body?.bankName}, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
@@ -163,5 +177,77 @@ describe("bank add — sort code and account number validation", () => {
     });
 
     expect(process.exitCode).toBe(0);
+  });
+});
+
+/**
+ * The OTP arrives out of band, so an agent can't be prompted for it — it supplies --otp instead.
+ * Without one and with no terminal, the command must say which flag to re-run with rather than
+ * failing opaquely: the send has already happened by then, so the user is holding a live code.
+ */
+describe("bank add — --otp", () => {
+  const origStdin = process.stdin.isTTY;
+  const origStdout = process.stdout.isTTY;
+
+  beforeEach(() => {
+    mock.reset();
+    process.exitCode = 0;
+    vi.clearAllMocks(); // prompt call counts accumulate across the file otherwise
+  });
+  afterEach(() => {
+    (process.stdin as any).isTTY = origStdin;
+    (process.stdout as any).isTTY = origStdout;
+  });
+
+  const FIELDS = {
+    bankName: "ATOA Test Bank",
+    sortCode: "12-34-56",
+    accountNumber: "13487215",
+    accountHolderName: "Cli Probe"
+  };
+
+  // The no-code probe request is what makes the backend SEND a code. Running it when the caller
+  // already holds one invalidates that code (random in production) and spends a send against the
+  // per-minute allowance — which is how this was caught: the throttle tripped on a live retry.
+  it("does not fire the code-sending probe when --otp is supplied", async () => {
+    mock.requireOtp();
+    (process.stdin as any).isTTY = false;
+    (process.stdout as any).isTTY = false;
+
+    await (bankAdd.run as any)({args: {...FIELDS, otp: "340820"}, rawArgs: []});
+
+    const posts = mock.requests.filter((r: any) => r.method === "POST");
+    expect(posts).toHaveLength(1); // one request only — the submit, not a probe then a submit
+    expect(posts[0].body.otp).toBe("340820");
+  });
+
+  it("sends the supplied code on the verify resubmit and never prompts", async () => {
+    mock.requireOtp();
+    (process.stdin as any).isTTY = false;
+    (process.stdout as any).isTTY = false;
+
+    await (bankAdd.run as any)({args: {...FIELDS, otp: "340819"}, rawArgs: []});
+
+    const withCode = mock.requests.filter((r: any) => r.body && "otp" in r.body);
+    expect(withCode).toHaveLength(1);
+    expect(withCode[0].body.otp).toBe("340819");
+    expect(prompts.input).not.toHaveBeenCalled();
+  });
+
+  it("names --otp when a code is required and there is no terminal", async () => {
+    mock.requireOtp();
+    (process.stdin as any).isTTY = false;
+    (process.stdout as any).isTTY = false;
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (bankAdd.run as any)({args: {...FIELDS}, rawArgs: []});
+    stderr.mockRestore();
+
+    // 9, not 3: nothing was invalid and no flag was missing — a code was sent and the caller has
+    // to come back with it. Exit 3 would tell an agent to go looking for a bad flag; exit 0 would
+    // claim the account was added. `atoa signup` reports the same state the same way.
+    expect(process.exitCode).toBe(9);
+    expect(out).toContain("--otp");
   });
 });

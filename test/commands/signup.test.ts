@@ -141,7 +141,9 @@ const mock = vi.hoisted(() => {
         }
       },
       format: "json",
-      formatExplicit: true, // deterministic machine-output branch → ctx.print() (not the TTY summary)
+      // Mirrors buildContext: passing --output is what makes the run non-interactive, so a test
+      // that omits it gets the prompting path and one that passes it must supply every flag.
+      formatExplicit: opts.output !== undefined,
       verbose: false,
       dryRun: opts.dryRun ?? false,
       yes: opts.yes ?? false,
@@ -294,11 +296,28 @@ function fullRunPrompts() {
   promptMocks.confirm.mockResolvedValue(true); // privacy, terms, marketing
 }
 
+/** Every value the wizard needs, as flags — the non-interactive path. */
+const FULL_FLAGS = {
+  businessName: "Flag Co",
+  industry: "Retail",
+  monthlyTurnover: "0-1000",
+  vatNumber: "123456789",
+  businessStructure: "Limited Company",
+  firstName: "Ada",
+  lastName: "Lovelace",
+  postalCode: "SW1A 2AA",
+  addressLine1: "10 Downing Street",
+  acceptTerms: true
+};
+
 beforeEach(() => {
   mock.reset();
   emailHttp.reset();
   process.exitCode = 0;
+  // Both streams: prompting needs stdin to read AND stdout to draw on, and the shared
+  // isInteractive() helper keys off stdout.
   (process.stdin as any).isTTY = true;
+  (process.stdout as any).isTTY = true;
   fullRunPrompts();
 });
 
@@ -436,8 +455,19 @@ describe("signup — happy path (full wizard)", () => {
   });
 
   it("prints a completion summary", async () => {
-    await (signup.run as any)({args: {}, rawArgs: []});
+    await (signup.run as any)({args: {output: "json", ...FULL_FLAGS}, rawArgs: []});
     expect(mock.getPrinted()).toMatchObject({status: "complete"});
+  });
+
+  // The whole wizard driven by flags, no prompt reachable: this is the path an agent uses.
+  it("completes with no prompts when every value arrives as a flag", async () => {
+    const {input} = await import("@inquirer/prompts");
+    await (signup.run as any)({args: {output: "json", ...FULL_FLAGS}, rawArgs: []});
+
+    expect(process.exitCode).toBe(0);
+    expect(input).not.toHaveBeenCalled();
+    const created = mock.requests.find((r) => r.path === "/api/business/" && r.method === "POST");
+    expect(created?.body).toMatchObject({legalBusinessName: "Flag Co", vatNumber: "123456789"});
   });
 });
 
@@ -494,6 +524,85 @@ describe("signup — --from-step 3", () => {
     expect(process.exitCode).toBe(3);
     expect(stderr.mock.calls.map((c) => String(c[0])).join("")).toMatch(/business/i);
     stderr.mockRestore();
+  });
+});
+
+/**
+ * Re-running signup against a finished business used to sit on "Start a new business from
+ * scratch?" forever with nobody to answer. Non-interactive now takes the prompt's own default —
+ * decline — because creating a second business unattended is the one outcome that can't be undone.
+ */
+describe("signup — already onboarded, non-interactive", () => {
+  it("stops with 'Nothing to do' instead of waiting on a prompt", async () => {
+    mock.setActiveBusinessId("biz_existing");
+    mock.setSeedBusiness({
+      legalBusinessName: "Existing Ltd",
+      tradingName: "Existing",
+      businessType: {id: "bt_1", name: "Retail"},
+      companyType: "COMPANY_LTD",
+      addressLine1: "1 High St",
+      addressPostalCode: "EC1A 1BB",
+      vatNumber: "123456789",
+      averageMonthlyTransaction: "0-1000"
+    });
+    vi.clearAllMocks();
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (signup.run as any)({args: {output: "json"}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(0);
+    const {confirm, select} = await import("@inquirer/prompts");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    // Nothing was created.
+    expect(mock.requests.filter((r) => r.method === "POST" && r.path === "/api/business/")).toHaveLength(0);
+  });
+});
+
+/**
+ * The non-interactive default resumes and never creates a second business, so --start-new is the
+ * only way to ask for the other branch without a terminal. Without it "create a new business" is
+ * unreachable headlessly; with it, creating one still requires saying so explicitly.
+ */
+describe("signup — --start-new", () => {
+  const onboarded = {
+    legalBusinessName: "Existing Ltd",
+    tradingName: "Existing",
+    businessType: {id: "bt_1", name: "Retail"},
+    companyType: "COMPANY_LTD",
+    addressLine1: "1 High St",
+    addressPostalCode: "EC1A 1BB",
+    vatNumber: "123456789",
+    averageMonthlyTransaction: "0-1000"
+  };
+
+  it("creates a new business when asked, on an already-onboarded account", async () => {
+    mock.setActiveBusinessId("biz_existing");
+    mock.setSeedBusiness(onboarded);
+    vi.clearAllMocks();
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (signup.run as any)({args: {output: "json", startNew: true, ...FULL_FLAGS}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(0);
+    expect(mock.requests.filter((r) => r.method === "POST" && r.path === "/api/business/")).toHaveLength(1);
+    const {confirm} = await import("@inquirer/prompts");
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("without it, the same run creates nothing", async () => {
+    mock.setActiveBusinessId("biz_existing");
+    mock.setSeedBusiness(onboarded);
+    vi.clearAllMocks();
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (signup.run as any)({args: {output: "json", ...FULL_FLAGS}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(0);
+    expect(mock.requests.filter((r) => r.method === "POST" && r.path === "/api/business/")).toHaveLength(0);
   });
 });
 
@@ -587,14 +696,39 @@ describe("signup — 429 rate limit aborts with message", () => {
 });
 
 describe("signup — non-TTY", () => {
-  it("errors immediately in non-TTY mode", async () => {
+  // With nobody to prompt, a missing value fails naming its flag instead of hanging — and it
+  // fails BEFORE any request, so nothing is sent and no OTP is spent.
+  // Phase 1 of the two-step signup: the code was sent and there is no terminal to type it in.
+  // Distinct from both success (nothing was created) and invalid input (nothing was wrong).
+  it("exits 9 after sending the code, telling the caller to re-run with --otp", async () => {
+    mock.setSessionExists(false);
     (process.stdin as any).isTTY = false;
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    (process.stdout as any).isTTY = false;
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (signup.run as any)({args: {email: "new@example.com", output: "json"}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(process.exitCode).toBe(9);
+    expect(out).toContain("--otp");
+    (process.stdin as any).isTTY = true;
+    (process.stdout as any).isTTY = true;
+  });
+
+  it("errors naming the missing flag, without calling the API", async () => {
+    (process.stdin as any).isTTY = false;
+    (process.stdout as any).isTTY = false;
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+    mock.setSessionExists(false); // no session → the email/OTP path, which needs --email
     await (signup.run as any)({args: {}, rawArgs: []});
     expect(process.exitCode).toBe(3);
     expect(mock.requests).toHaveLength(0);
+    expect(out).toContain("--email");
     stderr.mockRestore();
     (process.stdin as any).isTTY = true;
+    (process.stdout as any).isTTY = true;
   });
 });
 
