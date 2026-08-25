@@ -21,8 +21,11 @@ Flags accept either spelling: `--locationName` or `--location-name`.
 ## How to run a write
 
 1. `atoa <command> --help` — see which flags exist and which are required.
-2. **Ask the user for each required value, one at a time.** Ask about optional ones too, offering
-   to skip. Never invent a name, address, postcode, sort code, account number, amount or reference.
+2. **Ask for one value at a time. Wait for the answer, then ask the next.** Do not present a
+   numbered list of fields for the user to fill in — that is a form, not a conversation, and it
+   makes them do the work of tracking what is still outstanding. If they volunteer several answers
+   at once, take them all and carry on from there. Ask about optional values too, offering to skip.
+   Never invent a name, address, postcode, sort code, account number, amount or reference.
 3. Show the assembled command in full and let them correct it.
 4. Run with `--dryRun --output json`, show the resolved request, wait for agreement.
 5. Run for real with `--output json --yes`.
@@ -97,6 +100,7 @@ argument. Run `atoa <command> --help` for the authoritative required/optional sp
 | link bank | `stores link-bank <ID> --bank <bankId>` | which store, which bank account |
 
 Flags: `--locationName --addressLine1 --addressLine2 --cityOrTown --addressPostalCode`
+Only `--addressLine2` is optional. Location name: 3–30 characters, letters, numbers and spaces.
 
 A store cannot be added until a bank account exists — **including** the rename case below. "Default"
 is not a valid location name, but if the business still has only its original DEFAULT location,
@@ -106,10 +110,17 @@ skipped on that path; the bank-account requirement still applies.
 ### Bank accounts
 | Action | Command | Ask the user for |
 |---|---|---|
-| create | `bank add` | **bank name**, **sort code**, **account number**, **account holder name**; optionally nickname, currency, primary |
+| create | `bank add` | **bank name**, **sort code**, **account number**; also ask for the account holder name (see below); optionally nickname, currency, primary |
 | delete | `bank delete <ID> --yes` | which account |
 
 Flags: `--bankName --sortCode --accountNumber --accountHolderName --nickName --currency --setPrimary --otp`
+Required: `--bankName`, `--sortCode`, `--accountNumber`. Sort code is exactly **6 digits** and
+tolerates spaces and hyphens (`12-34-56`, `12 34 56`). Account number is exactly **8 digits** and
+tolerates **spaces only** — `1234-5678` is rejected.
+
+`--accountHolderName` is technically optional, but **ask for it and pass it**: it is what the
+Confirmation-of-Payee check runs against, and omitting it gives up that check. It is not
+length-limited here. `--nickName`, `--currency` and `--setPrimary` are optional.
 
 **Adding a second account requires a one-time code.** Run it without `--otp` first; it exits **9**
 with *"An OTP was sent to your registered contact. Re-run with --otp &lt;code&gt;"*. Ask the user for the
@@ -124,11 +135,14 @@ re-request. Two failed attempts is the point to hand back, not to try again.
 ### Staff
 | Action | Command | Ask the user for |
 |---|---|---|
-| create | `staff add` / `staff invite` | **first name**, **last name**, **email**; optionally phone, role, store |
+| create | `staff add` / `staff invite` | **first name**, **last name**, **role**, and **either an email or a phone number** |
 | update | `staff update <ID>` | which user, then the fields to change |
 | delete | `staff delete <ID> --yes` | which user |
 
 Flags: `--firstName --lastName --email --phoneCountryCode --phone --role --store`
+`--role` is **required** — run `atoa roles list --output json` first and ask which role. A contact
+is required too, but either channel satisfies it: `--email`, or `--phoneCountryCode` **and**
+`--phone` together. `--store` is optional.
 
 ### Roles
 | Action | Command | Ask the user for |
@@ -138,6 +152,8 @@ Flags: `--firstName --lastName --email --phoneCountryCode --phone --role --store
 | delete | `roles delete <ID> --yes` | which role |
 
 Flags: `--name --description --permission`
+Only `--name` is required: 3–100 characters, and it must not duplicate an existing role name
+(the check is case-insensitive). `--description` and `--permission` are optional.
 
 ### Add-on plan
 | Action | Command | Notes |
@@ -159,13 +175,16 @@ Run `atoa comms list` first for valid topics. At least one channel flag is requi
 atoa custom-branding set "#RRGGBB"      atoa custom-branding reset --yes
 atoa custom-sms set <NAME>              atoa custom-sms delete --yes
 ```
-SMS sender name: **3–11 characters**, letters, numbers and spaces. `Acme Ltd` is fine; `Acme-Ltd`
-and `AB` are not.
+Theme colour: a **6-digit hex** value, e.g. `#FF0000`. SMS sender name: **3–11 characters**,
+letters, numbers and spaces — `Acme Ltd` is fine; `Acme-Ltd` and `AB` are not.
 
 ### Direct Debit (platform fees)
 `atoa direct-debit setup` — ask for **account number**, **sort code**, **name**, **email**,
-**address line 1**, **city**, **postcode**; optionally address line 2. One mandate per business; it
-cannot be set up twice.
+**address line 1**, **city**, **postcode**. Only `--addressLine2` is optional. Sort code and account
+number share `bank add`'s validators exactly (6 and 8 digits, same separator handling). Unlike
+`bank add`, the **name here is required and capped at 20 characters** — it is what the mandate's
+name field accepts. One mandate per business; it cannot be set up twice, so check
+`atoa direct-debit status --output json` before offering to create one.
 
 ### API keys
 ```
@@ -233,9 +252,11 @@ Two invocations — the code goes to the user's email and you cannot read it.
 sent, so asking a dozen questions between the two commands can burn the whole window and force a
 resend. Work in this order:
 
-1. **Ask the user for every value first** — email, business name, industry, monthly turnover,
-   business structure, VAT number, first and last name, postcode, address line 1. Offer the
-   optional ones (`--website-url`, `--address-line2`, `--phone-country-code`, `--phone-number`).
+1. **Collect every value first, asking one question at a time** — email, business name, industry,
+   monthly turnover, business structure, VAT number, first name, last name, postcode, address
+   line 1, in that order. Wait for each answer before asking the next; do not paste the list and
+   ask them to fill it in. Then offer the optional ones together, as one question they can decline:
+   website URL, address line 2, phone number.
 2. Confirm they accept the Privacy Policy and Terms of Service (see below).
 3. Show them the full command you are about to run.
 4. **Only then** run the first invocation, which sends the code:
@@ -259,10 +280,17 @@ same command **without `--otp`** — it resumes from where it stopped.
 - **`--accept-terms` records their acceptance of the Privacy Policy and Terms of Service.** Only
   pass it if they have explicitly agreed, and tell them what they are agreeing to. `--marketing` is
   a separate opt-in, off unless asked for.
-- `--industry`, `--monthly-turnover`, `--business-structure` take the option's **name**. If it
-  doesn't match, the CLI exits 3 and **lists every valid value** — show that list, ask which, re-run.
-  Don't guess: "Retail" is ambiguous when nine options begin with it.
-- Optional: `--website-url`, `--address-line2`, `--phone-country-code`, `--phone-number`.
+- `--business-structure` is **Limited Company** or **Charity** — offer those two as a choice.
+- `--industry` and `--monthly-turnover` come from the API, so you cannot know the valid values in
+  advance. Ask in plain language, then expect to refine: if the value doesn't match, the CLI exits 3
+  and **lists every valid option**. Show that list, ask which one they meant, and re-run **without
+  `--otp`** (the account already exists by then). Tell the user to expect this rather than treating
+  it as an error. Never guess — "Retail" is ambiguous when nine options begin with it.
+- **`--vat-number` is required**, and must be 9 digits, optionally prefixed `GB`. Spaces are fine
+  (`GB 123 456 789` works). There is no "none" — do not offer one. If the business genuinely has no
+  VAT number, signup cannot be completed from the CLI.
+- **Genuinely optional**, and fine to skip — offer them together as one question they can decline:
+  `--website-url`, `--address-line2`, `--phone-country-code`, `--phone-number`.
 - **The same OTP throttle applies here.** One attempt per code; if it's wrong, ask the user for a
   new one *once*. Do not sit in a request-a-code loop — repeated sends are rate-limited per minute
   and repeated wrong codes block the account for an hour. Exit 5 means stop and wait.
