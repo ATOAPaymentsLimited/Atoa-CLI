@@ -4,7 +4,7 @@ import {
   BackendErrorCode,
   GENERIC_BAD_REQUEST,
   OTP_DOMAIN_CODES,
-  OTP_THROTTLE_CODES
+  RATE_LIMITED_CODES
 } from "./enums";
 
 export type AtoaErrorKind =
@@ -124,11 +124,11 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
   const message = typeof raw === "string" ? raw.slice(0, 200) : `HTTP ${status}`;
   const errorCode = errorCodeOf(b);
 
-  // Both OTP throttles — too many sends, and too many wrong codes — are a "slow down", not an auth
-  // failure, and neither is cleared by retyping. Both arms are needed: the bank surface tags them
-  // with a code, every other surface throws a bare 400 whose only marker is the wording.
+  // Throttles — too many sends, too many wrong codes, or a sign-in cooldown — are a "slow down",
+  // not an auth failure, and none is cleared by retrying. Both arms are needed: the bank surface
+  // tags them with a code, every other surface throws a bare 400 whose only marker is the wording.
   if (
-    (errorCode && OTP_THROTTLE_CODES.includes(errorCode)) ||
+    (errorCode && RATE_LIMITED_CODES.includes(errorCode)) ||
     /maximum number of otp requests|too many otp requests|incorrect code too many times|maximum number of attempts reached|too many failed attempts/i.test(
       message
     )

@@ -143,6 +143,18 @@ describe("access refusals are not credential failures", () => {
     expect(captureStderr(err)).not.toContain("atoa login");
   });
 
+  // The cooldown message says "wait N seconds"; classified as auth it printed "run `atoa login`"
+  // underneath — advising the very action that caused the lockout.
+  it("never advises re-authenticating during a sign-in cooldown", () => {
+    const err = mapHttpResponse(
+      401,
+      {name: "AUTHENTICATION_COOLDOWN", message: "Please wait for 300 seconds before retrying"},
+      "req"
+    );
+    expect(err.kind).toBe("rate_limit");
+    expect(captureStderr(err)).not.toContain("atoa login");
+  });
+
   it("leaves a genuine dead token as auth with the login hint", () => {
     const err = mapHttpResponse(401, {name: "INVALID_CREDENTIAL", message: "Invalid token. Expired."}, "req");
     expect(err.kind).toBe("auth");
@@ -234,6 +246,17 @@ describe("mapHttpResponse", () => {
       "bank, verification limit",
       401,
       {name: "BANK_OTP_VERIFICATION_LIMIT_REACH", message: "Too many failed attempts."}
+    ],
+    // Not an OTP throttle at all — a sign-in lockout after repeated failures. Classified by code
+    // rather than by wording, so a copy edit backend-side can't turn it back into "run atoa login".
+    [
+      "sign-in cooldown",
+      401,
+      {
+        name: "AUTHENTICATION_COOLDOWN",
+        message: "Please wait for 300 seconds before retrying",
+        additionalData: {retryAfterSeconds: 300, cooldownType: "PASSWORD"}
+      }
     ],
     [
       "non-bank, 1 hour",

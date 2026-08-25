@@ -45,6 +45,8 @@ export const BackendErrorCode = {
   ROLE_UNAUTHORIZED_ACCESS: "ROLE_UNAUTHORIZED_ACCESS",
   /** Business is not KYB-approved. Its `title` carries the merchant status. */
   KYB_VERIFICATION_REQUIRED: "KYB_VERIFICATION_REQUIRED",
+  /** Sign-in locked after repeated failures. Carries retryAfterSeconds in additionalData. */
+  AUTHENTICATION_COOLDOWN: "AUTHENTICATION_COOLDOWN",
   /** Wrong code, attempts still remaining — the one OTP failure a retype can actually fix. */
   BANK_INCORRECT_OTP: "BANK_INCORRECT_OTP",
   /** The code timed out. Retyping it cannot help; a fresh one must be requested. */
@@ -86,10 +88,16 @@ export const OTP_DOMAIN_CODES: readonly string[] = [
   BackendErrorCode.BANK_OTP_CODE_EXPIRED
 ];
 
-export const OTP_THROTTLE_CODES: readonly string[] = [
+/**
+ * "Wait, then retry" — not "you're unauthenticated", though they arrive as 401. Covers both OTP
+ * throttles and the sign-in cooldown, which is a lockout after repeated failed attempts rather than
+ * anything to do with OTP; hence the general name.
+ */
+export const RATE_LIMITED_CODES: readonly string[] = [
   BackendErrorCode.BANK_OTP_LIMIT_REACH,
   BackendErrorCode.BANK_OTP_VERIFICATION_LIMIT_REACH,
-  BackendErrorCode.BANK_OTP_ONE_MINUTE_LIMIT_REACH
+  BackendErrorCode.BANK_OTP_ONE_MINUTE_LIMIT_REACH,
+  BackendErrorCode.AUTHENTICATION_COOLDOWN
 ];
 
 /** Addon features whose limits the plan controls. */
