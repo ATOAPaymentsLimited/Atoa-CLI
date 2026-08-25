@@ -9,6 +9,7 @@
 import Table from "cli-table3";
 import * as yaml from "js-yaml";
 import {t} from "./i18n";
+import {AtoaError} from "./errors";
 
 export type OutputFormat = "json" | "table" | "yaml";
 
@@ -53,7 +54,9 @@ export function renderKeyValues(heading: string, rows: Array<[string, string | u
 
 export function resolveFormat(requested: string | undefined): OutputFormat {
   if (requested === "json" || requested === "table" || requested === "yaml") return requested;
-  if (requested) throw new Error(t("invalidOutputValue", {requested}));
+  // AtoaError, not Error: this is caught by the command handler either way, but a plain Error has
+  // no `kind`, so exitCodeFor falls back to 1 — a bad --output reads as a server failure.
+  if (requested) throw new AtoaError(t("invalidOutputValue", {requested}), "validation");
   return "table";
 }
 

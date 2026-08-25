@@ -24,6 +24,7 @@ type BankAddArgs = CommonOptions & {
   nickName?: string;
   currency?: string;
   setPrimary?: boolean;
+  otp?: string;
 };
 
 /** Subset of the /api/institutions response we use. */
@@ -50,7 +51,8 @@ export default defineCommand({
     accountHolderName: {type: "string", description: t("argAccountHolderNamePrompted")},
     nickName: {type: "string", description: t("argNickName")},
     currency: {type: "string", description: t("argCurrency")},
-    setPrimary: {type: "boolean", description: t("argSetPrimary")}
+    setPrimary: {type: "boolean", description: t("argSetPrimary")},
+    otp: {type: "string", description: t("argOtp")}
   }),
   run: runWithContext<BankAddArgs>(async (ctx, args) => {
     const tty = Boolean(process.stdin.isTTY);
@@ -72,6 +74,7 @@ export default defineCommand({
     const {data, otpUsed} = await withOtp(ctx.http, {
       send: V1_ROUTES.bank.add,
       body,
+      otp: args.otp,
       onOtpSent: () => process.stderr.write(t("otpSentToContact")),
       resolveRetry: async (err) => {
         if (err.errorCode !== BackendErrorCode.COP_VERIFIED_WITH_FUZZY_MATCH) return null;

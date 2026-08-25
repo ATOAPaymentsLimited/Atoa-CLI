@@ -3,6 +3,7 @@ import type {HttpClient} from "./http";
 import type {V1Route} from "./v1-routes";
 import {AtoaError} from "./errors";
 import {BackendErrorCode} from "./enums";
+import {t} from "./i18n";
 
 /**
  * "OTP sent — resubmit the same body with `otp` populated". The backend i18n value carries a
@@ -20,6 +21,11 @@ export interface WithOtpOptions {
   body: Record<string, unknown>;
   /** Path params applied to both calls. */
   pathParams?: Record<string, string>;
+  /**
+   * Code supplied up front (`--otp`), skipping the prompt. Gets a single attempt: there is nobody
+   * to retype it, so re-running the command is the caller's retry.
+   */
+  otp?: string;
   /** Max OTP entry attempts. Default 5 (matches the backend's OTP_MAX_WRONG_ATTEMPTS). */
   maxAttempts?: number;
   /** OTP prompt (overridable for tests). Default: @inquirer input. */
@@ -44,46 +50,45 @@ export interface WithOtpOptions {
  */
 export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{data: unknown; otpUsed: boolean}> {
   const verifyRoute = opts.verify ?? opts.send;
-  const maxAttempts = opts.maxAttempts ?? 5;
+  const supplied = opts.otp?.trim();
+  const maxAttempts = supplied ? 1 : (opts.maxAttempts ?? 5);
   const promptOtp = opts.promptOtp ?? ((message: string) => input({message}));
 
-  // First attempt — no otp. Succeeds outright when the backend doesn't require one.
-  // (When it raises 401, the http client refreshes-and-replays once before surfacing
-  // the error — a harmless extra round-trip on the bank path.)
-  try {
-    const res = await http.request({...opts.send, pathParams: opts.pathParams, body: opts.body});
-    return {data: res.data, otpUsed: false};
-  } catch (err) {
-    if ((err as AtoaError).errorCode !== OTP_REQUIRED_CODE) throw err;
+  // Skipped when a code was supplied: the probe request is what makes the backend SEND a code, so
+  // running it would invalidate the one the caller is holding (and spend a send against the
+  // per-minute allowance). With --otp we already know a code is required — submit it directly.
+  if (!supplied) {
+    // First attempt — no otp. Succeeds outright when the backend doesn't require one.
+    // (When it raises 401, the http client refreshes-and-replays once before surfacing
+    // the error — a harmless extra round-trip on the bank path.)
+    try {
+      const res = await http.request({...opts.send, pathParams: opts.pathParams, body: opts.body});
+      return {data: res.data, otpUsed: false};
+    } catch (err) {
+      if ((err as AtoaError).errorCode !== OTP_REQUIRED_CODE) throw err;
+    }
+
+    opts.onOtpSent?.();
   }
 
-  opts.onOtpSent?.();
-
-  // Default prompt needs a terminal; a test-supplied promptOtp does not.
-  if (!opts.promptOtp && !process.stdin.isTTY) {
-    throw new AtoaError("An OTP is required to continue, but no interactive terminal is available.", "validation");
+  // Default prompt needs a terminal; a supplied code or a test-supplied promptOtp does not.
+  // The send has already happened by this point, so the message names --otp: re-running with it
+  // is the way through, and the code the caller just received is the one to use.
+  if (!supplied && !opts.promptOtp && !process.stdin.isTTY) {
+    throw new AtoaError(t("otpRequiredPassFlag"), "otp_required");
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const otp = await promptOtp(`OTP (attempt ${attempt}/${maxAttempts}):`);
+    const otp = supplied || (await promptOtp(t("labelOtpAttempt", {attempt, max: maxAttempts})));
     try {
       const res = await http.request({...verifyRoute, pathParams: opts.pathParams, body: {...opts.body, otp}});
       return {data: res.data, otpUsed: true};
     } catch (err) {
       const ae = err as AtoaError;
-      // Keyed on kind, not status: the bank surface throttles with a 401, not a 429.
-      if (ae.kind === "rate_limit" || ae.status === 429) {
-        throw new AtoaError(
-          `OTP rate limit reached${ae.message ? ": " + ae.message : ""}. Please wait before trying again.`,
-          "rate_limit",
-          {status: ae.status, requestId: ae.requestId}
-        );
-      }
       // The OTP itself verified but the request raised a resolvable error (e.g. a CoP fuzzy-name
-      // match — which may also be a 400). Let the caller turn it into extra body fields and re-send
-      // once with the same otp. resolveRetry returns null for errors it doesn't handle (including a
-      // genuine wrong-OTP 400), which then falls through to the OTP-retry logic below.
-      if (opts.resolveRetry) {
+      // match). Let the caller turn it into extra body fields and re-send once with the same otp.
+      // resolveRetry returns null for errors it doesn't handle, which fall through to retry logic.
+      if (!isThrottle(ae) && opts.resolveRetry) {
         const extra = await opts.resolveRetry(ae);
         if (extra) {
           const res = await http.request({
@@ -94,29 +99,41 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
           return {data: res.data, otpUsed: true};
         }
       }
-      // Expiry is only raised for a code that MATCHED, so retyping it re-fails identically —
-      // 5 prompts and 5 round-trips to reach the message the first attempt already had.
-      if (ae.errorCode === BackendErrorCode.BANK_OTP_CODE_EXPIRED) {
-        throw new AtoaError(ae.message, "validation", {status: ae.status, requestId: ae.requestId});
-      }
-      // Wrong code — retry while attempts remain. Status differs by surface: onboarding answers 400,
-      // the bank flow 401. INVALID_CREDENTIAL is excluded: that 401 is a dead access token, and
-      // re-prompting spends OTP attempts no retype can fix.
-      const wrongCode =
-        ae.status === 400 || (ae.status === 401 && ae.errorCode !== BackendErrorCode.INVALID_CREDENTIAL);
-      if (wrongCode && attempt < maxAttempts) {
+      if (retryableWrongCode(ae) && attempt < maxAttempts) {
         process.stderr.write(`${ae.message}\n`);
         continue;
       }
-      if (wrongCode) {
-        throw new AtoaError(ae.message || "Too many incorrect OTP attempts.", "validation", {
-          status: ae.status,
-          requestId: ae.requestId
-        });
-      }
-      throw err;
+      throw asOtpFailure(ae, err);
     }
   }
   // Loop always returns or throws; this satisfies the type checker.
   throw new AtoaError("OTP verification failed.", "validation");
+}
+
+/** Keyed on kind, not status: the bank surface throttles with a 401, not a 429. */
+const isThrottle = (ae: AtoaError): boolean => ae.kind === "rate_limit" || ae.status === 429;
+
+/**
+ * A code that another attempt could actually fix. Status differs by surface (onboarding answers
+ * 400, the bank flow 401). Two exclusions: INVALID_CREDENTIAL is a dead access token, and expiry is
+ * only raised for a code that MATCHED — retyping either re-fails identically.
+ */
+function retryableWrongCode(ae: AtoaError): boolean {
+  if (isThrottle(ae) || ae.errorCode === BackendErrorCode.BANK_OTP_CODE_EXPIRED) return false;
+  return ae.status === 400 || (ae.status === 401 && ae.errorCode !== BackendErrorCode.INVALID_CREDENTIAL);
+}
+
+/** Final classification once retrying is no longer an option. */
+function asOtpFailure(ae: AtoaError, original: unknown): unknown {
+  const opts = {status: ae.status, requestId: ae.requestId};
+  if (isThrottle(ae)) {
+    return new AtoaError(t("otpRateLimited", {message: ae.message ?? ""}), "rate_limit", opts);
+  }
+  if (ae.errorCode === BackendErrorCode.BANK_OTP_CODE_EXPIRED) {
+    return new AtoaError(ae.message, "validation", opts);
+  }
+  if (retryableWrongCode(ae)) {
+    return new AtoaError(ae.message || t("otpTooManyAttempts"), "validation", opts);
+  }
+  return original;
 }

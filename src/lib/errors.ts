@@ -16,6 +16,7 @@ export type AtoaErrorKind =
   | "network" // exit 6 — fetch reject / DNS / TLS
   | "business_selection" // exit 7 — HTTP 400 with businessIds[] (JWT user belongs to >1 business, none selected)
   | "plan_limit" // exit 8 — HTTP 403 ADDON_UPGRADE_REQUIRED (an addon-plan refusal, not an auth failure)
+  | "otp_required" // exit 9 — a one-time code was sent; re-run with --otp. Nothing failed, but nothing was written either
   | "generic"; // exit 1 — everything else
 
 const EXIT_CODES: Record<AtoaErrorKind, number> = {
@@ -27,6 +28,7 @@ const EXIT_CODES: Record<AtoaErrorKind, number> = {
   network: 6,
   business_selection: 7,
   plan_limit: 8,
+  otp_required: 9,
   generic: 1
 };
 
