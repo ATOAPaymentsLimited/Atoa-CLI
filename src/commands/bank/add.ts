@@ -27,6 +27,7 @@ type BankAddArgs = CommonOptions & {
   nickName?: string;
   currency?: string;
   setPrimary?: boolean;
+  confirmPayeeName?: boolean;
   otp?: string;
 };
 
@@ -55,14 +56,14 @@ export default defineCommand({
     nickName: {type: "string", description: t("argNickName")},
     currency: {type: "string", description: t("argCurrency")},
     setPrimary: {type: "boolean", description: t("argSetPrimary")},
+    confirmPayeeName: {type: "boolean", description: t("argConfirmPayeeName")},
     otp: {type: "string", description: t("argOtp")}
   }),
   run: runWithContext<BankAddArgs>(async (ctx, args) => {
-    const tty = Boolean(process.stdin.isTTY);
-
-    if (!tty && (!args.bankName || !args.sortCode || !args.accountNumber)) {
-      throw new AtoaError(t("bankAddInteractiveOnly"), "validation");
-    }
+    // stdout, not stdin: a prompt renders to stdout, so `--output json > file` in a terminal would
+    // draw the question into the file and leave the user staring at a silent shell. Each field now
+    // reports itself missing by name instead of one blanket "this command is interactive".
+    const tty = isInteractive(ctx.formatExplicit);
 
     const body = await collectAccountFields(ctx, args, tty);
 
@@ -85,6 +86,14 @@ export default defineCommand({
         const entered =
           (err.additionalData?.["registeredName"] as string) || (body["accountHolderName"] as string) || "";
         if (entered) process.stderr.write(t("accountNameDiffers", {entered}));
+
+        // Pre-authorised, or asked — never assumed. Throwing instead would look like the safer
+        // default, but the OTP has already been verified by the time this runs, so it would spend
+        // a live code on a yes/no. Accepting the bank's name cannot misroute anything: sort code
+        // and account number decide where the money lands, the name is only the check against it.
+        if (args.confirmPayeeName) return {confirmFuzzyCheck: true};
+        if (!tty) throw new AtoaError(t("copConfirmRequired", {registered}), "validation");
+
         const ok = await confirm({
           message: t("useBankRegisteredName", {registered}),
           default: false

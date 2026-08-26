@@ -50,6 +50,13 @@ export async function resolveField(opts: ResolveFieldOptions): Promise<string | 
       validate: (v) => (opts.optional && !v.trim() ? true : opts.rule(v))
     })
   ).trim();
+
+  // Makes the `Promise<string>` overload true rather than merely customary. Nothing empty gets
+  // past `validate` today, but only because every rule used for a required field happens to
+  // reject "" — one that tolerates it would hand back undefined to a caller the compiler has
+  // already promised a string, and the first `.toUpperCase()` on it would be the bug report.
+  if (!opts.optional && !answer) throw new AtoaError(t("flagRequired", {flag: opts.flag}), "validation");
+
   return answer || undefined;
 }
 

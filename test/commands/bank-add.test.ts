@@ -10,17 +10,29 @@ vi.mock("@inquirer/prompts", () => ({
 const mock = vi.hoisted(() => {
   const requests: Array<{method: string; path: string; body?: any}> = [];
   let otpRequired = false;
+  let copFuzzy = false;
   return {
     requests,
+    requireCopConfirmation() {
+      copFuzzy = true;
+    },
     /** Shape of GET /api/business/:businessId — the prefill source for the holder name. */
     business: undefined as unknown,
+    /**
+     * Prompting is gated on `isInteractive`, i.e. stdout is a terminal AND no explicit --output.
+     * Tests that expect a prompt must clear this as well as setting the TTY flags — passing
+     * --output json is itself what turns prompting off.
+     */
+    formatExplicit: true,
     requireOtp() {
       otpRequired = true;
     },
     reset() {
       requests.length = 0;
       otpRequired = false;
+      copFuzzy = false;
       this.business = undefined;
+      this.formatExplicit = true;
     },
     buildContext: async (opts: any) => ({
       env: "sandbox",
@@ -38,6 +50,17 @@ const mock = vi.hoisted(() => {
                 requestId: "r"
               });
             }
+            // Confirmation of Payee near-match: cleared only once the caller accepts the name
+            // the bank holds.
+            if (copFuzzy && !req.body?.confirmFuzzyCheck) {
+              const {AtoaError} = await import("../../src/lib/errors");
+              throw new AtoaError("Name is a close match", "validation", {
+                status: 400,
+                errorCode: "COP_VERIFIED_WITH_FUZZY_MATCH",
+                requestId: "r",
+                additionalData: {fuzzyName: "ACME TRADING LIMITED", registeredName: req.body?.accountHolderName}
+              });
+            }
             return {status: 200, data: {id: "bank_new", bankName: req.body?.bankName}, requestId: "r"};
           }
           if (req.path === "/api/business/:businessId" && req.method === "GET") {
@@ -47,7 +70,7 @@ const mock = vi.hoisted(() => {
         }
       },
       format: "json",
-      formatExplicit: true,
+      formatExplicit: mock.formatExplicit,
       verbose: false,
       dryRun: opts.dryRun ?? false,
       yes: opts.yes ?? false,
@@ -157,6 +180,8 @@ describe("bank add — sort code and account number validation", () => {
 
   it("on a TTY, re-prompts for a corrected sort code instead of sending the invalid one", async () => {
     (process.stdin as {isTTY?: boolean}).isTTY = true;
+    (process.stdout as {isTTY?: boolean}).isTTY = true;
+    mock.formatExplicit = false;
     vi.mocked(prompts.input).mockReset();
     vi.mocked(prompts.input).mockResolvedValueOnce("234567"); // the corrected sort code
 
@@ -171,6 +196,8 @@ describe("bank add — sort code and account number validation", () => {
 
   it("wires validateSortCode as the prompt's own validator, so inquirer itself rejects a bad retype", async () => {
     (process.stdin as {isTTY?: boolean}).isTTY = true;
+    (process.stdout as {isTTY?: boolean}).isTTY = true;
+    mock.formatExplicit = false;
     vi.mocked(prompts.input).mockReset();
     vi.mocked(prompts.input).mockImplementationOnce(async (o: any) => {
       expect(o.validate("SWA1A1AA")).not.toBe(true); // still rejected
@@ -261,6 +288,7 @@ describe("bank add — --otp", () => {
 
 describe("bank add — which name is offered as the account holder", () => {
   const origStdin = process.stdin.isTTY;
+  const origStdout = process.stdout.isTTY;
   const HOLDER_LABEL = t("labelAccountHolderName");
   const PERSON = "Ada Lovelace";
   const COMPANY = "Acme Trading Ltd";
@@ -279,10 +307,13 @@ describe("bank add — which name is offered as the account holder", () => {
     process.exitCode = 0;
     vi.clearAllMocks();
     (process.stdin as any).isTTY = true;
+    (process.stdout as any).isTTY = true;
+    mock.formatExplicit = false;
   });
 
   afterEach(() => {
     (process.stdin as any).isTTY = origStdin;
+    (process.stdout as any).isTTY = origStdout;
   });
 
   // This is not a convenience default — it is the name Confirmation of Payee is matched against,
@@ -317,5 +348,117 @@ describe("bank add — which name is offered as the account holder", () => {
     });
 
     expect(offeredDefault()).toBeUndefined();
+  });
+});
+
+/**
+ * `--output json` is documented as the flag that turns prompting off, and it has to be, because a
+ * prompt renders to stdout: redirect stdout and the question is drawn into the file while the
+ * terminal sits silent. Gating on stdin alone let that happen.
+ */
+describe("bank add — --output json never opens a prompt", () => {
+  const origStdin = process.stdin.isTTY;
+  const origStdout = process.stdout.isTTY;
+
+  beforeEach(() => {
+    mock.reset();
+    process.exitCode = 0;
+    vi.clearAllMocks();
+    // A real terminal: both streams are TTYs. Only --output json distinguishes this run.
+    (process.stdin as any).isTTY = true;
+    (process.stdout as any).isTTY = true;
+  });
+
+  afterEach(() => {
+    (process.stdin as any).isTTY = origStdin;
+    (process.stdout as any).isTTY = origStdout;
+  });
+
+  it("does not prompt for --set-primary even though citty leaves it undefined", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (bankAdd.run as any)({
+      args: {bankName: "ATOA Test Bank", sortCode: "040004", accountNumber: "12345678", output: "json", dryRun: true},
+      rawArgs: []
+    });
+    stderr.mockRestore();
+
+    // The reported hang: `setPrimary` arrives undefined, so `?? (tty ? confirm : false)` used to
+    // open a confirm nobody could see.
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(prompts.input).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("names the missing flag instead of asking for it", async () => {
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (bankAdd.run as any)({
+      args: {bankName: "ATOA Test Bank", accountNumber: "12345678", output: "json", dryRun: true},
+      rawArgs: []
+    });
+    stderr.mockRestore();
+
+    expect(prompts.input).not.toHaveBeenCalled();
+    expect(out).toContain("sort-code");
+    expect(process.exitCode).toBe(3);
+  });
+});
+
+/**
+ * A Confirmation-of-Payee near-match is answered after the OTP has already been verified, so
+ * erroring out costs the caller a live code. Accepting the bank's name cannot misroute anything —
+ * sort code and account number decide that — but it still must not happen by assumption.
+ */
+describe("bank add — Confirmation of Payee near-match", () => {
+  const origStdin = process.stdin.isTTY;
+  const origStdout = process.stdout.isTTY;
+
+  beforeEach(() => {
+    mock.reset();
+    process.exitCode = 0;
+    vi.clearAllMocks();
+    mock.requireCopConfirmation();
+    (process.stdin as any).isTTY = false;
+    (process.stdout as any).isTTY = false;
+  });
+
+  afterEach(() => {
+    (process.stdin as any).isTTY = origStdin;
+    (process.stdout as any).isTTY = origStdout;
+  });
+
+  const ARGS = {
+    bankName: "ATOA Test Bank",
+    sortCode: "040004",
+    accountNumber: "12345678",
+    accountHolderName: "Acme Trading Ltd",
+    otp: "123456",
+    output: "json"
+  };
+
+  it("refuses to guess, naming the flag and the name the bank holds", async () => {
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (bankAdd.run as any)({args: ARGS, rawArgs: []});
+    stderr.mockRestore();
+
+    // Previously this reached an @inquirer confirm with no stdin — an opaque throw or a stall,
+    // after the code had already been spent.
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(out).toContain("--confirm-payee-name");
+    expect(out).toContain("ACME TRADING LIMITED");
+    expect(process.exitCode).toBe(3);
+  });
+
+  it("accepts the bank's name when --confirm-payee-name is passed", async () => {
+    await (bankAdd.run as any)({args: {...ARGS, confirmPayeeName: true}, rawArgs: []});
+
+    const accepted = mock.requests.filter((r) => r.method === "POST").at(-1);
+    expect(accepted?.body?.confirmFuzzyCheck).toBe(true);
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
   });
 });

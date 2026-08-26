@@ -74,7 +74,6 @@
   "downgradeEstimatedCharges": " Estimated charges: £{amount}.",
   "downgradeBlockedByUsage": "Cannot downgrade to {plan} — current usage exceeds that plan:\n{blockers}\nReduce usage first, then retry.",
   "downgradeRefusedCompareUsage": "\nRun `atoa addons list` to compare current usage against the target plan.",
-  "bankAddInteractiveOnly": "bank add is interactive (it prompts for details + an OTP). In a non-interactive shell pass --bank-name, --sort-code and --account-number.",
   "otpSentToContact": "An OTP has been sent to your registered contact. Enter it below.\n",
   "otpVerified": "✓ OTP verified.\n",
   "theNameYourBankHolds": "the name your bank holds",
@@ -445,5 +444,7 @@
   "googleUnlinkNotApplied": "The link to store {store} is still present after the request. Nothing was removed — check the store id and try again.",
   "googleUnnamedListing": "(unnamed listing)",
   "argDdAcceptMandate": "confirm acceptance of the Direct Debit mandate terms",
-  "mandateAcceptanceRequired": "Setting up a Direct Debit records your acceptance of the mandate terms. Pass --accept-mandate to confirm the business agrees to them."
+  "mandateAcceptanceRequired": "Setting up a Direct Debit records your acceptance of the mandate terms. Pass --accept-mandate to confirm the business agrees to them.",
+  "argConfirmPayeeName": "accept the name the bank holds if it differs slightly from the one given",
+  "copConfirmRequired": "The bank holds this account under \"{registered}\", which is close to but not the same as the name given. Re-run with --confirm-payee-name to accept the bank's name, or with --account-holder-name set to match it. You will need a fresh --otp."
 }
