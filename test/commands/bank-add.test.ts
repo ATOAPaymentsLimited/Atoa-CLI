@@ -12,12 +12,15 @@ const mock = vi.hoisted(() => {
   let otpRequired = false;
   return {
     requests,
+    /** Shape of GET /api/business/:businessId — the prefill source for the holder name. */
+    business: undefined as unknown,
     requireOtp() {
       otpRequired = true;
     },
     reset() {
       requests.length = 0;
       otpRequired = false;
+      this.business = undefined;
     },
     buildContext: async (opts: any) => ({
       env: "sandbox",
@@ -36,6 +39,9 @@ const mock = vi.hoisted(() => {
               });
             }
             return {status: 200, data: {id: "bank_new", bankName: req.body?.bankName}, requestId: "r"};
+          }
+          if (req.path === "/api/business/:businessId" && req.method === "GET") {
+            return {status: 200, data: mock.business ?? {}, requestId: "r"};
           }
           return {status: 200, data: {}, requestId: "r"};
         }
@@ -60,6 +66,7 @@ vi.mock("../../src/lib/context", async () => {
 
 import bankAdd from "../../src/commands/bank/add";
 import * as prompts from "@inquirer/prompts";
+import {t} from "../../src/lib/i18n";
 
 const BASE_ARGS = {bankName: "ATOA Test Bank", accountHolderName: "Cli Probe", dryRun: true};
 
@@ -249,5 +256,66 @@ describe("bank add — --otp", () => {
     // claim the account was added. `atoa signup` reports the same state the same way.
     expect(process.exitCode).toBe(9);
     expect(out).toContain("--otp");
+  });
+});
+
+describe("bank add — which name is offered as the account holder", () => {
+  const origStdin = process.stdin.isTTY;
+  const HOLDER_LABEL = t("labelAccountHolderName");
+  const PERSON = "Ada Lovelace";
+  const COMPANY = "Acme Trading Ltd";
+
+  const businessWith = (companyType?: string) => ({
+    user: {firstName: "Ada", lastName: "Lovelace"},
+    business: {businessInfo: {legalBusinessName: COMPANY, companyType}}
+  });
+
+  /** The default offered at the holder-name prompt, whatever order the prompts ran in. */
+  const offeredDefault = () =>
+    vi.mocked(prompts.input).mock.calls.find(([o]: any) => o?.message === HOLDER_LABEL)?.[0]?.default;
+
+  beforeEach(() => {
+    mock.reset();
+    process.exitCode = 0;
+    vi.clearAllMocks();
+    (process.stdin as any).isTTY = true;
+  });
+
+  afterEach(() => {
+    (process.stdin as any).isTTY = origStdin;
+  });
+
+  // This is not a convenience default — it is the name Confirmation of Payee is matched against,
+  // so offering the wrong one invites a mismatch on a real payout account.
+  const cases: Array<{companyType?: string; expected: string; because: string}> = [
+    {companyType: "COMPANY_LTD", expected: COMPANY, because: "a limited company holds the account in its legal name"},
+    {companyType: "SOLE_TRADER", expected: PERSON, because: "a sole trader's account is in their own name"},
+    {companyType: "CHARITY", expected: PERSON, because: "a charity is not a limited company"},
+    // The one that is easy to "correct" back into a bug: an unset type must not read as a company.
+    {companyType: undefined, expected: PERSON, because: "an unset type is not evidence of a company"}
+  ];
+
+  for (const {companyType, expected, because} of cases) {
+    it(`offers ${expected === COMPANY ? "the legal name" : "the person's name"} when companyType is ${companyType ?? "unset"} — ${because}`, async () => {
+      mock.business = businessWith(companyType);
+
+      await (bankAdd.run as any)({
+        args: {bankName: "ATOA Test Bank", sortCode: "123456", accountNumber: "12345678", dryRun: true},
+        rawArgs: []
+      });
+
+      expect(offeredDefault()).toBe(expected);
+    });
+  }
+
+  it("offers nothing rather than a stray name when the lookup fails", async () => {
+    mock.business = {};
+
+    await (bankAdd.run as any)({
+      args: {bankName: "ATOA Test Bank", sortCode: "123456", accountNumber: "12345678", dryRun: true},
+      rawArgs: []
+    });
+
+    expect(offeredDefault()).toBeUndefined();
   });
 });

@@ -3,7 +3,8 @@ import {readFileSync, existsSync} from "node:fs";
 import {resolve} from "node:path";
 
 /**
- * CLAUDE.md is the contract an agent reads before touching a real merchant account, and a flag
+ * AGENTS.md (and its CLAUDE.md pointer) is the contract an agent reads before touching a real
+ * merchant account, and a flag
  * renamed in code but not in the doc fails at runtime looking like a CLI bug. A one-off check
  * goes stale the moment the next flag lands, so the check lives here instead.
  *
@@ -34,6 +35,7 @@ const GROUPS = [
   "custom-sms",
   "direct-debit",
   "comms",
+  "google",
   "payments",
   "customers",
   "payment-methods",
@@ -59,11 +61,12 @@ async function collectFlags(cmd: Cmd, into: Set<string>): Promise<void> {
 /** --location-name and --locationName are the same flag; compare on one spelling. */
 const canonical = (s: string) => s.replace(/^--/, "").replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase());
 
-describe("CLAUDE.md stays in step with the CLI", () => {
-  const docPath = resolve(__dirname, "../../CLAUDE.md");
+describe("the agent guide stays in step with the CLI", () => {
+  const docPaths = ["AGENTS.md"].map((f) => resolve(__dirname, "../..", f));
 
   it("references no flag the CLI doesn't define", async () => {
-    if (!existsSync(docPath)) return; // doc is optional; nothing to verify
+    const present = docPaths.filter((p) => existsSync(p));
+    if (!present.length) return; // docs are optional; nothing to verify
     const real = new Set<string>(["env", "output", "verbose", "dryRun", "yes", "profile", "help", "version"]);
 
     for (const g of GROUPS) {
@@ -72,10 +75,12 @@ describe("CLAUDE.md stays in step with the CLI", () => {
     }
     const known = new Set([...real].map((f) => canonical(f)));
 
-    const doc = readFileSync(docPath, "utf8");
+    const doc = present.map((p) => readFileSync(p, "utf8")).join("\n");
     const used = [...new Set(doc.match(/--[a-zA-Z][\w-]*/g) ?? [])];
     const unknown = used.filter((f) => !known.has(canonical(f)));
 
     expect({unknown, checked: used.length}).toEqual({unknown: [], checked: used.length});
-  });
+    // Importing all 33 command modules lands near vitest's 5s default, which made this fail
+    // intermittently under parallel load. The work is real, so raise the limit rather than trim it.
+  }, 30_000);
 });

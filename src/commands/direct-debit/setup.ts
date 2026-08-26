@@ -24,7 +24,7 @@ type Field = "accountNumber" | "sortCode" | "name" | "email" | "addressLine1" | 
 /** Collected by a bespoke masked prompt rather than the shared loop below. */
 const ACCOUNT_NUMBER: Field = "accountNumber";
 
-type DirectDebitSetupArgs = CommonOptions & Partial<Record<Field, string>>;
+type DirectDebitSetupArgs = CommonOptions & Partial<Record<Field, string>> & {acceptMandate?: boolean};
 
 /**
  * Prompt order, label, rule and optionality in one table. Split across separate lists, omitting
@@ -61,7 +61,8 @@ export default defineCommand({
     addressLine1: {type: "string", description: t("argDdAddressLine1")},
     addressLine2: {type: "string", description: t("argDdAddressLine2")},
     city: {type: "string", description: t("argDdCity")},
-    postalCode: {type: "string", description: t("argDdPostalCode")}
+    postalCode: {type: "string", description: t("argDdPostalCode")},
+    acceptMandate: {type: "boolean", description: t("argDdAcceptMandate")}
   }),
   run: runWithContext<DirectDebitSetupArgs>(async (ctx, args) => {
     const interactive = isInteractive(ctx.formatExplicit);
@@ -75,7 +76,7 @@ export default defineCommand({
     const prefill: DirectDebitPrefill = interactive ? await resolvePrefill(ctx) : {};
     const fields = await collectFields(args, prefill, interactive);
 
-    await assertMandateAccepted(interactive);
+    await assertMandateAccepted(interactive, args.acceptMandate);
 
     const body = buildBody(fields, prefill.bankCode);
 
@@ -236,12 +237,18 @@ async function assertNoActiveMandate(ctx: CommandContext): Promise<void> {
 /**
  * Mandate acceptance, asked as the last question before the mandate is created. Answering no
  * stops the run — the mandate cannot be set up without it.
+ *
+ * The body records an affirmative `customer_acceptance` with a timestamp, so this cannot be
+ * skipped merely because nobody is there to ask: that would assert a consent that was never
+ * given. Unattended runs carry it as --accept-mandate, the same shape signup uses for its terms.
  */
-async function assertMandateAccepted(interactive: boolean): Promise<void> {
-  if (!interactive) return;
+async function assertMandateAccepted(interactive: boolean, accepted: boolean | undefined): Promise<void> {
+  if (accepted) return;
+  if (!interactive) throw new AtoaError(t("mandateAcceptanceRequired"), "validation");
   const {confirm} = await import("@inquirer/prompts");
-  const accepted = await confirm({message: t("mandateAcceptTerms"), default: true});
-  if (!accepted) throw new AtoaError(t("mandateNotAccepted"), "validation");
+  if (!(await confirm({message: t("mandateAcceptTerms"), default: true}))) {
+    throw new AtoaError(t("mandateNotAccepted"), "validation");
+  }
 }
 
 /**

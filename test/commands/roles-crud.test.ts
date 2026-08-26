@@ -130,6 +130,23 @@ describe("roles update", () => {
     expect(putReq!.body).not.toHaveProperty("permissionIds");
   });
 
+  it("sends an emptied description so clearing one actually clears it", async () => {
+    // The change was counted but `if (description)` dropped the field from the body, so the
+    // backend kept the old text and the CLI still reported the update as applied.
+    await (rolesUpdate.run as any)({args: {roleId: "role_1", description: ""}, rawArgs: []});
+
+    const putReq = mock.requests.find((r) => r.method === "PUT");
+    expect(putReq).toBeDefined();
+    expect(putReq!.body).toHaveProperty("description", "");
+  });
+
+  it("leaves description out entirely when it was never touched", async () => {
+    await (rolesUpdate.run as any)({args: {roleId: "role_1", name: "Till"}, rawArgs: []});
+
+    const putReq = mock.requests.find((r) => r.method === "PUT");
+    expect(putReq!.body).not.toHaveProperty("description");
+  });
+
   it("includes permissionIds (even replacing with a smaller set) when --permission flags are given", async () => {
     await (rolesUpdate.run as any)({args: {roleId: "role_1"}, rawArgs: ["--permission", "perm_2"]});
     const putReq = mock.requests.find((r) => r.method === "PUT");

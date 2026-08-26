@@ -54,6 +54,12 @@ export const V1_ROUTES = {
   institutions: {
     list: jwt("GET", "/api/institutions")
   },
+  google: {
+    searchLocations: jwt("GET", "/api/review-system/merchant-stores/search-google-locations"),
+    linkedLocations: jwt("GET", "/api/review-system/merchant-stores/:businessId/Google"),
+    linkLocation: jwt("POST", "/api/review-system/merchant-stores/:businessId/Google/link-location"),
+    unlinkLocation: jwt("DELETE", "/api/review-system/merchant-stores/:businessId/Google/unlink-location/:storeId")
+  },
   kyb: {
     status: jwt("GET", "/api/merchant/:businessId/getKybStatus")
   },

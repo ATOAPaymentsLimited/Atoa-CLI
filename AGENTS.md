@@ -21,14 +21,23 @@ Flags accept either spelling: `--locationName` or `--location-name`.
 ## How to run a write
 
 1. `atoa <command> --help` — see which flags exist and which are required.
-2. **Ask for one value at a time. Wait for the answer, then ask the next.** Do not present a
-   numbered list of fields for the user to fill in — that is a form, not a conversation, and it
-   makes them do the work of tracking what is still outstanding. If they volunteer several answers
-   at once, take them all and carry on from there. Ask about optional values too, offering to skip.
-   Never invent a name, address, postcode, sort code, account number, amount or reference.
-3. Show the assembled command in full and let them correct it.
-4. Run with `--dryRun --output json`, show the resolved request, wait for agreement.
-5. Run for real with `--output json --yes`.
+2. **Look the answers up before asking for them.** Most of what a write needs is already on the
+   account. Read it first — `atoa whoami`, `atoa business list`, `atoa stores list`,
+   `atoa roles list`, `atoa bank list` — and **offer the likely value for confirmation** instead of
+   asking cold: *"The account holder name would be Acme Trading Ltd — is that right?"* is one
+   keystroke; *"What is the account holder name?"* is a chore. The reads are free and safe.
+   Never invent a name, address, postcode, sort code, account number, amount or reference — a value
+   you found on the account is not an invention, a value you assumed is.
+3. **Ask one topic at a time, not one field at a time.** Wait for the answer, then ask the next.
+   Fields that are a single thought belong in a single question — an address is one question, not
+   four. Keep these separate and one at a time, because each deserves its own decision: amounts,
+   whom a role or staff member applies to, anything recording consent, and anything destructive.
+   Do not present a numbered form for the user to fill in — that makes them track what is still
+   outstanding. If they volunteer several answers at once, take them all and carry on from there.
+   Ask about optional values too, offering to skip, and offer them together as one question.
+4. Show the assembled command in full and let them correct it.
+5. Run with `--dryRun --output json`, show the resolved request, wait for agreement.
+6. Run for real with `--output json --yes`.
 
 If it exits 3, name the flag that was wrong and ask for a corrected value — do not guess and re-run.
 
@@ -55,7 +64,7 @@ report this state the same way.
 
 - **Browser login** (`atoa login`) — `whoami`, `business`, `profile`, `keys`, `sessions`, `stores`,
   `bank`, `kyb`, `staff`, `roles`, `addons`, `comms`, `custom-branding`, `custom-sms`,
-  `direct-debit`, `payment-links`, `signup`. Exit 2 → ask the user to run `atoa login`.
+  `direct-debit`, `payment-links`, `google`, `signup`. Exit 2 → ask the user to run `atoa login`.
 - **SDK key** — `payments`, `customers`, `payment-methods`, `card-on-file`, `refunds`, `payouts`,
   `webhooks`, `bank-feed`, `institutions`, and raw `get`/`post`/`delete`. Exit 2 → check
   `atoa keys list --output json`, or mint one with `atoa keys create` (see **API keys** below for
@@ -78,6 +87,7 @@ atoa staff list                  atoa roles list
 atoa addons list                 atoa comms list
 atoa kyb status                  atoa kyb card status
 atoa custom-branding get         atoa custom-sms list
+atoa google locations            atoa google search "<text>"
 atoa direct-debit status         atoa sessions list
 atoa keys list                   atoa institutions list
 atoa webhooks list               atoa payouts list
@@ -163,6 +173,12 @@ tolerates **spaces only** — `1234-5678` is rejected.
 Confirmation-of-Payee check runs against, and omitting it gives up that check. It is not
 length-limited here. `--nickName`, `--currency` and `--setPrimary` are optional.
 
+**Suggest the holder name rather than asking cold.** Run `atoa business list --output json` and
+`atoa whoami --output json` first. For a limited company the account is held in the
+`legalBusinessName`; for a sole trader or charity it is normally the owner's own name, which
+`whoami` gives you. Offer the likely one, let the user correct it, then pass what they confirm.
+Interactively the CLI prefills the same value, so this only closes the gap for you.
+
 **Adding a second account requires a one-time code.** Run it without `--otp` first; it exits **9**
 with *"An OTP was sent to your registered contact. Re-run with --otp &lt;code&gt;"*. Ask the user for the
 code, then re-run the **same command** plus `--otp <code>`. The first account on a business is not
@@ -173,17 +189,47 @@ throttle: roughly one send per minute, and too many wrong codes blocks the accou
 that a new code cannot clear. If you see exit 5, stop entirely and tell the user to wait — do not
 re-request. Two failed attempts is the point to hand back, not to try again.
 
+### Google Business listing
+| Action | Command | Ask the user for |
+|---|---|---|
+| find a listing | `google search "<text>"` | **the business name, with enough town or street to disambiguate** |
+| link to a store | `google link --store <ID> --search "<text>" --place-id <placeId>` | which store, then which listing |
+| remove a link | `google unlink --store <ID> --yes` | which store |
+| list linked | `google locations` | — |
+
+Always **search first and show the user the results**, then link with a `placeId` taken from that
+list. `--place-id` on its own exits 3: the listing's name and address are stored exactly as the CLI
+sends them and are never looked up from the id, so the search is what supplies them. Pass the same
+`--search` text both times — the id must appear in those results or the command exits 3.
+
+One listing can be linked to **one store, anywhere on the platform**. Linking one that is already
+taken — including re-linking a store to the listing it already has — exits **1** with *"Google
+Location already linked to Atoa"*. That is not a flag problem and re-running will not fix it.
+
+Linking a store that already has a listing **replaces** it, so confirm the exact listing with the
+user and `--dryRun` first. A wrong link is recoverable: `google unlink --store <ID> --yes` removes
+it, and the listing is then free to link again. `--store` takes the **Atoa store id**, the same one
+you linked with — `google unlink` without it lists the linked stores and exits 3, and a store with
+no link exits 4 rather than pretending to remove something.
+
+`google search` works on any account. `link`, `unlink` and `locations` need the Google Review
+add-on, and that is checked **before** the request reaches the endpoint — without it they exit **8**
+whatever the flags say, and `atoa addons list` shows the limits. Once the plan allows it,
+`locations` still exits **4** until the merchant connects their Google Business account, which
+happens in the dashboard, not the CLI. Report either and stop; neither is fixable by re-running.
+
 ### Staff
 | Action | Command | Ask the user for |
 |---|---|---|
-| create | `staff add` / `staff invite` | **first name**, **last name**, **role**, and **either an email or a phone number** |
+| create | `staff add` / `staff invite` | **first name**, **last name**, **role**, and **at least one of email / phone** (both is fine) |
 | update | `staff update <ID>` | which user, then the fields to change |
 | delete | `staff delete <ID> --yes` | which user |
 
 Flags: `--firstName --lastName --email --phoneCountryCode --phone --role --store`
-`--role` is **required** — run `atoa roles list --output json` first and ask which role. A contact
-is required too, but either channel satisfies it: `--email`, or `--phoneCountryCode` **and**
-`--phone` together. `--store` is optional.
+`--role` is **required** — run `atoa roles list --output json` first and ask which role. A contact is
+required too: `--email`, or `--phoneCountryCode` **and** `--phone` together — or all three. At least
+one channel is the rule, not exactly one, so ask the user for both and pass whatever they give you.
+`--store` is optional and repeatable.
 
 ### Roles
 | Action | Command | Ask the user for |
@@ -194,7 +240,8 @@ is required too, but either channel satisfies it: `--email`, or `--phoneCountryC
 
 Flags: `--name --description --permission`
 Only `--name` is required: 3–100 characters, and it must not duplicate an existing role name
-(the check is case-insensitive). `--description` and `--permission` are optional.
+(the check is case-insensitive). `--description` and `--permission` are optional. Passing
+`--description ""` clears an existing description; omitting the flag leaves it untouched.
 
 ### Add-on plan
 | Action | Command | Notes |
@@ -224,8 +271,14 @@ letters, numbers and spaces — `Acme Ltd` is fine; `Acme-Ltd` and `AB` are not.
 **address line 1**, **city**, **postcode**. Only `--addressLine2` is optional. Sort code and account
 number share `bank add`'s validators exactly (6 and 8 digits, same separator handling). Unlike
 `bank add`, the **name here is required and capped at 20 characters** — it is what the mandate's
-name field accepts. One mandate per business; it cannot be set up twice, so check
+name field accepts. The name here is the person's, not the business's — the mandate is signed by an
+individual. One mandate per business; it cannot be set up twice, so check
 `atoa direct-debit status --output json` before offering to create one.
+
+**`--accept-mandate` is required** and records the merchant's agreement to the Direct Debit mandate
+terms. Without it the command exits 3 and creates nothing. Only pass it once the user has
+explicitly agreed, and tell them what they are agreeing to — the request stores an affirmative
+acceptance with a timestamp, so passing it on their behalf asserts something on the record.
 
 ### API keys
 ```
