@@ -5,9 +5,10 @@ unsure, run `atoa <command> --help` — it is authoritative, this file is a summ
 
 ## The one rule that makes everything work
 
-**Pass `--output json` on every command.** It is not only a formatting flag — it is what puts the
-CLI into non-interactive mode, so no prompt is ever opened. Add `--yes` to anything that changes or
-deletes something.
+**Pass `--output json` on every command, and `--yes` on anything that writes.** Both are needed and
+they turn off different prompts: `--output json` is not only a formatting flag — it is what stops
+the CLI asking for *values* — while `--yes` is what stops it asking for *confirmation*. With only
+one of them a command can still stop and wait for an answer.
 
 ```
 atoa <command> --output json --yes [flags]
@@ -82,7 +83,7 @@ valid options when they don't. Everything else is id-only.
 | 2 | not authenticated / not permitted | see Credentials |
 | 3 | invalid input the CLI itself rejected (a value that failed validation) | fix what the message names and retry |
 | 4 | not found | check the id |
-| 5 | rate limited | **stop and wait** — retrying extends the block |
+| 5 | rate limited or locked out | **stop and hand back** — never retry. Read the message out to the user: some clear with time, some need a fresh code only they can request |
 | 6 | network/TLS | report |
 | 7 | several businesses, none active | `atoa business list`, ask, then `atoa business use <id>` |
 | 8 | plan limit | report; `atoa addons list` shows limits |
@@ -224,11 +225,11 @@ fact you had no way of knowing until the bank replied. So:
 Either way **a fresh `--otp` is needed** — the first code was already spent verifying the attempt
 that hit the near-match.
 
-**Suggest the holder name rather than asking cold.** Run `atoa business list --output json` and
-`atoa whoami --output json` first. For a limited company the account is held in the
-`legalBusinessName`; for a sole trader or charity it is normally the owner's own name, which
-`whoami` gives you. Offer the likely one, let the user correct it, then pass what they confirm.
-Interactively the CLI prefills the same value, so this only closes the gap for you.
+**Offer both candidate names rather than asking cold.** Run `atoa business list --output json` for
+the `legalBusinessName` and `atoa whoami --output json` for the user's own name, then ask which the
+account is held in. A limited company's account is normally in the legal business name, a sole
+trader's or charity's in the owner's own — but **no read command exposes the company type**, so
+this is a question for the user, not something to infer. Show both and let them pick.
 
 **Adding a second account requires a one-time code.** Run it without `--otp` first; it exits **9**
 with *"An OTP was sent to your registered contact. Re-run with --otp &lt;code&gt;"*. Ask the user for the
@@ -237,8 +238,9 @@ challenged. One attempt per code — a wrong one is not retried; go back to the 
 
 **Never loop on this.** Requesting codes repeatedly, or submitting wrong ones repeatedly, trips a
 throttle: roughly one send per minute, and too many wrong codes blocks the account for an **hour**
-that a new code cannot clear. If you see exit 5, stop entirely and tell the user to wait — do not
-re-request. Two failed attempts is the point to hand back, not to try again.
+that a new code cannot clear. If you see exit 5, stop entirely and read the message out — some say
+to wait, others say to request a new code, and only the user can decide to do that. Never
+re-request on your own. Two failed attempts is the point to hand back, not to try again.
 
 ### Google Business listing
 | Action | Command | Ask the user for |
@@ -403,11 +405,11 @@ Two invocations — the code goes to the user's email and you cannot read it.
 sent, so asking a dozen questions between the two commands can burn the whole window and force a
 resend. Work in this order:
 
-1. **Collect every value first, asking one question at a time** — email, business name, industry,
-   monthly turnover, business structure, VAT number, first name, last name, postcode, address
-   line 1, in that order. Wait for each answer before asking the next; do not paste the list and
-   ask them to fill it in. Then offer the optional ones together, as one question they can decline:
-   website URL, address line 2, phone number.
+1. **Collect every value first, one topic at a time** — email, business name, industry, monthly
+   turnover, business structure, VAT number, their name (first and last together), then the
+   address (postcode and line 1 together), in that order. Wait for each answer before moving on;
+   do not paste the list and ask them to fill it in. Then offer the optional ones together, as one
+   question they can decline: website URL, address line 2, phone number.
 2. Confirm they accept the Privacy Policy and Terms of Service (see below).
 3. Show them the full command you are about to run.
 4. **Only then** run the first invocation, which sends the code:
