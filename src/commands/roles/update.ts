@@ -110,7 +110,9 @@ export default defineCommand({
     }
 
     const body: Record<string, unknown> = {name};
-    if (description) body["description"] = description;
+    // Keyed on the change, not on truthiness: `if (description)` dropped the field when clearing
+    // it, so the backend kept the old text while the CLI reported the update as applied.
+    if (descriptionChanged) body["description"] = description || "";
     if (permissionsTouched) body["permissionIds"] = permissionIds;
 
     if (ctx.dryRun) {

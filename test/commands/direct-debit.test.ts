@@ -71,7 +71,10 @@ const FULL_ARGS = {
   email: "billing@acme.example",
   addressLine1: "1 Test Rd",
   city: "London",
-  postalCode: "SW11AA"
+  postalCode: "SW11AA",
+  // The body records an affirmative acceptance with a timestamp, so an unattended run has to
+  // carry the consent explicitly. Omitting it is its own test below.
+  acceptMandate: true
 };
 
 describe("direct-debit status", () => {
@@ -125,6 +128,19 @@ describe("direct-debit setup", () => {
       state: "UK",
       postal_code: "SW11AA"
     });
+  });
+
+  it("will not stamp mandate acceptance that nobody gave", async () => {
+    const {acceptMandate: _omitted, ...withoutConsent} = FULL_ARGS;
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (directDebitSetup.run as any)({args: withoutConsent, rawArgs: []});
+    stderr.mockRestore();
+
+    // customer_acceptance asserts the merchant agreed, with a timestamp. Unattended and
+    // unconfirmed, the only honest outcome is to send nothing.
+    expect(mock.requests.some((r) => r.method === "POST")).toBe(false);
+    expect(process.exitCode).toBe(3);
   });
 
   // Derived from the mandate status, not a field on the response — reading a non-existent

@@ -16,6 +16,9 @@ import {
   normaliseAccountNumber
 } from "../../lib/validators";
 
+/** The only company type whose bank account is held in the business's name rather than a person's. */
+const COMPANY_LTD = "company_ltd";
+
 type BankAddArgs = CommonOptions & {
   bankName?: string;
   sortCode?: string;
@@ -189,7 +192,8 @@ async function collectAccountFields(
     if (reEntered !== accountNumber) throw new AtoaError(t("accountNumbersDoNotMatch"), "validation");
   }
 
-  // Account holder name prefills from the signed-in user's profile name — press Enter to accept.
+  // Prefilled with the legal business name — press Enter to accept, or type over it for an
+  // account held in a different name.
   const accountHolderName =
     args.accountHolderName?.trim() ||
     (tty
@@ -221,12 +225,31 @@ async function collectAccountFields(
   };
 }
 
-/** Best-effort prefill for the account holder name: the signed-in user's profile name. */
+/**
+ * Best-effort prefill for the account holder name: a limited company's account is held in its legal
+ * name, anyone else's in their own. Getting this wrong is not cosmetic — the name is what
+ * Confirmation of Payee is matched against.
+ *
+ * An unset company type falls back to the person's name rather than assuming a company; absence is
+ * not evidence of one, and the prompt stays editable either way.
+ *
+ * One request covers it: this route returns the signed-in user alongside the business.
+ */
 async function defaultHolderName(ctx: CommandContext): Promise<string | undefined> {
   try {
-    const {data} = await ctx.http.request({...V1_ROUTES.identity.get});
-    const {firstName, lastName} = (data ?? {}) as {firstName?: string; lastName?: string};
-    return [firstName, lastName].filter(Boolean).join(" ") || undefined;
+    const {data} = await ctx.http.request({...V1_ROUTES.onboarding.getBusiness});
+    const {user, business} = (data ?? {}) as {
+      user?: {firstName?: string; lastName?: string};
+      business?: {businessInfo?: {legalBusinessName?: string; companyType?: string}};
+    };
+
+    const {legalBusinessName, companyType} = business?.businessInfo ?? {};
+    // Stored uppercase (COMPANY_LTD), compared lowercase.
+    if (legalBusinessName?.trim() && companyType?.toLowerCase().includes(COMPANY_LTD)) {
+      return legalBusinessName.trim();
+    }
+
+    return [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || undefined;
   } catch {
     return undefined;
   }

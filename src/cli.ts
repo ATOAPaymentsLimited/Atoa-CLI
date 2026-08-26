@@ -57,6 +57,7 @@ const main = defineCommand({
     payouts: () => import("./commands/payouts").then((m) => m.default),
     "bank-feed": () => import("./commands/bank-feed").then((m) => m.default),
     institutions: () => import("./commands/institutions").then((m) => m.default),
+    google: () => import("./commands/google").then((m) => m.default),
 
     completion: () => import("./commands/completion").then((m) => m.default)
   }
