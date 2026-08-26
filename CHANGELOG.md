@@ -22,6 +22,24 @@ Accurate failure reporting, and `signup` / `bank add` runnable without a termina
 - `--start-new` on `signup`, to create a second business rather than resuming an existing one.
   Without it, an unattended re-run resumes or reports "Nothing to do" — it never creates one by
   itself.
+- **`--confirm-payee-name` on `bank add`**, for a Confirmation-of-Payee near-match. Without it an
+  unattended run now exits `3` quoting the name the bank holds, rather than opening a prompt
+  nobody can answer after the one-time code has already been spent. It is deliberately not
+  covered by `--yes`.
+- **`atoa google`** — `search`, `link`, `unlink` and `locations`, pairing an Atoa store with its
+  Google Business listing.
+
+### Changed
+
+- **`bank add` and `keys create` no longer prompt when `--output` is passed.** Both decided this
+  from stdin alone, but a prompt is drawn to stdout — so `bank add --output json > file` in a
+  terminal wrote the question into the file and appeared to hang. They now use the same rule as
+  every other command: prompts only when stdout is a terminal and no `--output` was given.
+  A terminal run with an explicit `--output` (including `--output table`, already the default)
+  now requires the flags instead of asking for them.
+- **`bank add` names the missing flag.** A non-interactive run without `--bank-name`, `--sort-code`
+  or `--account-number` now reports which one is missing, instead of one blanket message listing
+  all three — and fails before contacting the API rather than after.
 
 ### Fixed
 
@@ -32,6 +50,10 @@ Accurate failure reporting, and `signup` / `bank add` runnable without a termina
 - **OTP throttles are reported as rate limits, not auth failures.** The wrong-code lockout was
   treated as a retryable typo, so the CLI re-prompted for a code that could never be accepted,
   spending the remaining attempts.
+- **A lockout now outranks the code it arrives with.** When a response carried a wrong-code marker
+  *and* lockout wording together, the wrong-code reading won and the CLI kept retrying into the
+  block. Such a response now exits `5` where it previously exited `3` — callers branching on that
+  path should expect the change. An ordinary wrong code is unaffected and still exits `3`.
 - **A sign-in cooldown is reported as a rate limit, not an auth failure.** After repeated failed
   attempts the backend locks sign-in and answers 401; the CLI printed "run `atoa login`" underneath
   a message saying to wait N seconds — recommending the exact action that caused the lockout. This

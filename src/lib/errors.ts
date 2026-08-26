@@ -127,14 +127,12 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
   // Throttles — too many sends, too many wrong codes, or a sign-in cooldown — are a "slow down",
   // not an auth failure, and none is cleared by retrying. Both arms are needed: the bank surface
   // tags them with a code, every other surface throws a bare 400 whose only marker is the wording.
-  if (
+  const throttled =
     (errorCode && RATE_LIMITED_CODES.includes(errorCode)) ||
     /maximum number of otp requests|too many otp requests|incorrect code too many times|maximum number of attempts reached|too many failed attempts/i.test(
       message
-    )
-  ) {
-    kind = "rate_limit";
-  }
+    );
+
   const ad = b["additionalData"];
   const additionalData = ad && typeof ad === "object" ? (ad as Record<string, unknown>) : undefined;
 
@@ -148,13 +146,23 @@ export function mapHttpResponse(status: number, body: unknown, requestId: string
   // And these describe the OTP, not the session — a mistyped or expired code is bad input.
   if (errorCode && OTP_DOMAIN_CODES.includes(errorCode)) kind = "validation";
 
+  // Last, and deliberately not overridable. A lockout can arrive carrying a wrong-code marker and
+  // lockout wording at once, and the arm above would then downgrade it to plain bad input — which
+  // is the reading that makes the caller spend another attempt against a block. The asymmetry
+  // decides the order: mistaking a wrong code for a throttle wastes one retry the user could have
+  // made anyway, while mistaking a throttle for a wrong code extends the lockout.
+  if (throttled) kind = "rate_limit";
+
   // For that one case the useful headline is `title`; `message` carries the addon's marketing
   // description ("Manage multiple store locations efficiently…"), which reads as a sales pitch
-  // rather than an error. Scoped to plan_limit deliberately: no other exception is known to set
-  // `title`, and preferring it blindly would bury genuine messages behind generic headings.
+  // rather than an error. Scoped to the addon refusal deliberately: no other exception is known to
+  // set `title`, and preferring it blindly would bury genuine messages behind generic headings.
+  //
+  // Keyed on the code rather than the resulting `kind`, which any later arm can overwrite — the
+  // headline should not depend on which classification happened to win.
   const titleRaw = b["title"];
   const title = typeof titleRaw === "string" ? titleRaw.trim().slice(0, 200) : "";
-  const useTitle = kind === "plan_limit" && title.length > 0 && title !== message;
+  const useTitle = errorCode === ADDON_UPGRADE_REQUIRED && title.length > 0 && title !== message;
 
   // The KYB refusal instead puts the merchant status (PENDING/IN_REVIEW/KYB_HOLD) in `title` —
   // which stage is blocking is the one thing its fixed message doesn't say.

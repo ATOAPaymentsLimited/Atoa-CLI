@@ -310,6 +310,59 @@ describe("mapHttpResponse", () => {
   });
 });
 
+/**
+ * A lockout can arrive tagged with a wrong-code marker and lockout wording at the same time. The
+ * code arm classifies that as plain bad input, which reads as "try again" — so the throttle arm
+ * runs last and wins. Getting this backwards is what makes the caller spend attempts into a block.
+ */
+describe("a throttle outranks the code that arrives with it", () => {
+  it("stays rate_limit when a wrong-code marker carries lockout wording", () => {
+    const err = mapHttpResponse(
+      401,
+      {name: "BANK_INCORRECT_OTP", message: "You have entered the incorrect code too many times."},
+      "r"
+    );
+
+    expect(err.kind).toBe("rate_limit");
+    expect(exitCodeFor(err.kind)).toBe(5);
+  });
+
+  it("still reads an ordinary wrong code as bad input", () => {
+    const err = mapHttpResponse(401, {name: "BANK_INCORRECT_OTP", message: "Incorrect code."}, "r");
+
+    // The negative control: without the lockout wording this must stay retryable, or withOtp
+    // would stop asking after the first typo.
+    expect(err.kind).toBe("validation");
+    expect(exitCodeFor(err.kind)).toBe(3);
+  });
+
+  it("keeps the addon headline even if another arm wins the classification", () => {
+    // The headline is chosen from the error code, not from whichever `kind` was assigned last —
+    // otherwise reordering the arms would silently swap a useful title for marketing copy.
+    const err = mapHttpResponse(
+      403,
+      {
+        name: "ADDON_UPGRADE_REQUIRED",
+        title: "Add more store locations",
+        message: "Maximum number of attempts reached."
+      },
+      "r"
+    );
+
+    expect(err.message).toBe("Add more store locations");
+  });
+
+  it("does not let an expired-code marker mask a send limit", () => {
+    const err = mapHttpResponse(
+      401,
+      {name: "BANK_OTP_CODE_EXPIRED", message: "Maximum number of OTP requests reached."},
+      "r"
+    );
+
+    expect(err.kind).toBe("rate_limit");
+  });
+});
+
 describe("printError", () => {
   it("writes AtoaError details to stderr", () => {
     const spy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
