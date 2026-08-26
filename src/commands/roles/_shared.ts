@@ -4,21 +4,21 @@ import {BackendErrorCode} from "../../lib/enums";
 import type {CommandContext} from "../../lib/context";
 import {t} from "../../lib/i18n";
 
-interface PermissionRow {
+export interface PermissionRow {
   id?: string;
   name?: string;
   /** Permissions this one cannot work without — e.g. refunding requires viewing payments. */
   dependsOnIds?: string[];
 }
 
-interface PermissionCategoryRow {
+export interface PermissionCategoryRow {
   name?: string;
   permissions?: PermissionRow[];
 }
 
 export type PermissionIndex = Map<string, {name: string; dependsOnIds: string[]}>;
 
-async function fetchCategories(ctx: CommandContext): Promise<PermissionCategoryRow[]> {
+export async function fetchCategories(ctx: CommandContext): Promise<PermissionCategoryRow[]> {
   const {data} = await ctx.http.request({...V1_ROUTES.permissions.list});
   const categories = ((data as {availablePermissions?: PermissionCategoryRow[]})?.availablePermissions ??
     []) as PermissionCategoryRow[];
