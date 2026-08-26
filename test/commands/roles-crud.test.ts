@@ -43,6 +43,24 @@ const mock = vi.hoisted(() => {
           if (req.path === "/api/business/:businessId/users/role/:roleId" && req.method === "DELETE") {
             return {status: 200, data: {message: "ok"}, requestId: "r"};
           }
+          if (req.path === "/api/permissions/:businessId/list" && req.method === "GET") {
+            return {
+              status: 200,
+              data: {
+                availablePermissions: [
+                  {
+                    name: "Invoices",
+                    permissions: [
+                      {id: "perm_inv_edit", name: "Can add, edit or remove invoices", dependsOnIds: ["perm_inv_view"]},
+                      {id: "perm_inv_view", name: "Can view invoice details"}
+                    ]
+                  },
+                  {name: "Refunds", permissions: [{id: "perm_refund", name: "Can process refunds"}]}
+                ]
+              },
+              requestId: "r"
+            };
+          }
           return {status: 200, data: {}, requestId: "r"};
         }
       },
@@ -69,6 +87,7 @@ vi.mock("../../src/lib/context", async () => {
 import rolesCreate from "../../src/commands/roles/add";
 import rolesUpdate from "../../src/commands/roles/update";
 import rolesDelete from "../../src/commands/roles/delete";
+import rolesPermissions from "../../src/commands/roles/permissions";
 
 beforeEach(() => {
   mock.reset();
@@ -175,5 +194,41 @@ describe("roles delete", () => {
     expect(process.exitCode).toBe(3);
     expect(mock.requests.some((r) => r.method === "DELETE")).toBe(false);
     stderr.mockRestore();
+  });
+});
+
+/**
+ * `--permission` takes ids, and before this command they existed only inside the interactive
+ * picker — so anyone scripting a role had no way to discover them. `roles list` is not a
+ * substitute: it shows permission *names*, and only for permissions some role already holds.
+ */
+describe("roles permissions", () => {
+  it("flattens the catalogue to id, name and category", async () => {
+    await (rolesPermissions.run as any)({args: {}, rawArgs: []});
+
+    expect(mock.getPrinted()).toEqual([
+      {
+        id: "perm_inv_edit",
+        name: "Can add, edit or remove invoices",
+        category: "Invoices",
+        requires: ["perm_inv_view"]
+      },
+      {id: "perm_inv_view", name: "Can view invoice details", category: "Invoices", requires: undefined},
+      {id: "perm_refund", name: "Can process refunds", category: "Refunds", requires: undefined}
+    ]);
+  });
+
+  it("reports prerequisites, so a role gaining more than was asked for is explainable", async () => {
+    await (rolesPermissions.run as any)({args: {}, rawArgs: []});
+
+    const editInvoices = (mock.getPrinted() as any[]).find((p) => p.id === "perm_inv_edit");
+    expect(editInvoices.requires).toEqual(["perm_inv_view"]);
+  });
+
+  it("--dryRun resolves the request without sending it", async () => {
+    await (rolesPermissions.run as any)({args: {dryRun: true}, rawArgs: []});
+
+    expect(mock.requests).toHaveLength(0);
+    expect(mock.getPrinted()).toMatchObject({method: "GET", path: "/api/permissions/:businessId/list"});
   });
 });

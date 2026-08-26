@@ -446,5 +446,6 @@
   "argDdAcceptMandate": "confirm acceptance of the Direct Debit mandate terms",
   "mandateAcceptanceRequired": "Setting up a Direct Debit records your acceptance of the mandate terms. Pass --accept-mandate to confirm the business agrees to them.",
   "argConfirmPayeeName": "accept the name the bank holds if it differs slightly from the one given",
-  "copConfirmRequired": "The bank holds this account under \"{registered}\", which is close to but not the same as the name given. Re-run with --confirm-payee-name to accept the bank's name, or with --account-holder-name set to match it. You will need a fresh --otp."
+  "copConfirmRequired": "The bank holds this account under \"{registered}\", which is close to but not the same as the name given. Re-run with --confirm-payee-name to accept the bank's name, or with --account-holder-name set to match it. You will need a fresh --otp.",
+  "cmdRolesPermissions": "List the permissions a role can be given, with their ids"
 }

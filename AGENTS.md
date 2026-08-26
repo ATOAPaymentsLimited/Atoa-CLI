@@ -41,6 +41,38 @@ Flags accept either spelling: `--locationName` or `--location-name`.
 
 If it exits 3, name the flag that was wrong and ask for a corrected value — do not guess and re-run.
 
+## Ids, not names — the mistake that looks like a server fault
+
+**Anything that identifies a record takes its id.** Passing the name a human would use sends that
+text straight to the API as though it were an id, and the reply is a generic *"Unable to process
+your request at the moment"* with exit **1** — which reads as an outage, not as your flag. This is
+the single most likely way to waste a run.
+
+`atoa staff add --role "Supervisor"` fails. `--role 4f3c…` succeeds.
+
+It is easy to get wrong because the interactive prompts show **names** — a terminal user picks
+"Supervisor" from a list and never sees an id — so a command copied from watching that flow looks
+right and is not.
+
+Resolve every one of these first, and pass what the list gives you:
+
+| Flag / argument | Get the id from |
+|---|---|
+| `--role` | `atoa roles list --output json` |
+| `--store`, `--storeId` | `atoa stores list --output json` |
+| `--permission` | `atoa roles permissions --output json` |
+| `--bank` | `atoa bank list --output json` |
+| `--customer`, `--customerId` | `atoa customers list --output json` |
+| plan id (`addons upgrade`/`downgrade`) | `atoa addons list --output json` |
+| any positional `<id>` — staff, roles, bank, keys, customers, payment links, webhooks | the matching `list` command |
+
+Show the user the **names** when you ask which one they mean, then send the id. Never show a raw
+id and ask them to choose.
+
+**The three exceptions**, which do accept a name: `atoa comms set <topic>`, and `signup`'s
+`--industry`, `--monthly-turnover` and `--business-structure`. Those match on name and tell you the
+valid options when they don't. Everything else is id-only.
+
 ## Exit codes — branch on these, not on error text
 
 | Code | Meaning | Action |
@@ -84,6 +116,7 @@ atoa profile list                atoa profile show
 atoa stores list                 atoa stores get <id>
 atoa bank list                   atoa bank get <id>
 atoa staff list                  atoa roles list
+atoa roles permissions
 atoa addons list                 atoa comms list
 atoa kyb status                  atoa kyb card status
 atoa custom-branding get         atoa custom-sms list
@@ -244,10 +277,11 @@ happens in the dashboard, not the CLI. Report either and stop; neither is fixabl
 | delete | `staff delete <ID> --yes` | which user |
 
 Flags: `--firstName --lastName --email --phoneCountryCode --phone --role --store`
-`--role` is **required** — run `atoa roles list --output json` first and ask which role. A contact is
+`--role` is **required** and takes the role's **id**, not its name — run
+`atoa roles list --output json`, show the user the names, and pass the matching `id`. A contact is
 required too: `--email`, or `--phoneCountryCode` **and** `--phone` together — or all three. At least
 one channel is the rule, not exactly one, so ask the user for both and pass whatever they give you.
-`--store` is optional and repeatable.
+`--store` is optional and repeatable, and also takes **ids** — from `atoa stores list --output json`.
 
 ### Roles
 | Action | Command | Ask the user for |
@@ -260,6 +294,11 @@ Flags: `--name --description --permission`
 Only `--name` is required: 3–100 characters, and it must not duplicate an existing role name
 (the check is case-insensitive). `--description` and `--permission` are optional. Passing
 `--description ""` clears an existing description; omitting the flag leaves it untouched.
+
+`--permission` is repeatable and takes permission **ids** — list them with
+`atoa roles permissions --output json`, which gives each one's `id`, `name` and `category`. Show
+the user the names, send the ids. A permission that lists `requires` pulls its prerequisites in
+too, so a role can end up with more than you asked for; the CLI prints what it added.
 
 ### Add-on plan
 | Action | Command | Notes |
