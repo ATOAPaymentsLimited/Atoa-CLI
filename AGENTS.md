@@ -164,7 +164,8 @@ skipped on that path; the bank-account requirement still applies.
 | create | `bank add` | **bank name**, **sort code**, **account number**; also ask for the account holder name (see below); optionally nickname, currency, primary |
 | delete | `bank delete <ID> --yes` | which account |
 
-Flags: `--bankName --sortCode --accountNumber --accountHolderName --nickName --currency --setPrimary --otp`
+Flags: `--bankName --sortCode --accountNumber --accountHolderName --nickName --currency --setPrimary
+--confirmPayeeName --otp`
 Required: `--bankName`, `--sortCode`, `--accountNumber`. Sort code is exactly **6 digits** and
 tolerates spaces and hyphens (`12-34-56`, `12 34 56`). Account number is exactly **8 digits** and
 tolerates **spaces only** — `1234-5678` is rejected.
@@ -172,6 +173,23 @@ tolerates **spaces only** — `1234-5678` is rejected.
 `--accountHolderName` is technically optional, but **ask for it and pass it**: it is what the
 Confirmation-of-Payee check runs against, and omitting it gives up that check. It is not
 length-limited here. `--nickName`, `--currency` and `--setPrimary` are optional.
+
+**A near-match on the name exits 3.** Confirmation of Payee compares what you send against what
+the bank holds, and a close-but-not-equal name ("Acme Trading Ltd" vs "ACME TRADING LIMITED") is
+refused rather than guessed at. The message names the bank's version.
+
+`--confirmPayeeName` accepts the bank's version. It is **not** covered by `--yes`, and that is
+deliberate — `--yes` skips confirmations you could have answered anyway, whereas this one reports a
+fact you had no way of knowing until the bank replied. So:
+
+- **Never pass it on the first attempt.** Doing so pre-accepts a name you have not seen.
+- **Never add it just because the error named it.** Exit 3 here is a question for the user, not a
+  flag to append and retry.
+- Show the user both names, ask which is right, and re-run with **either** `--accountHolderName`
+  set to match the bank's, **or** `--confirmPayeeName` to accept it.
+
+Either way **a fresh `--otp` is needed** — the first code was already spent verifying the attempt
+that hit the near-match.
 
 **Suggest the holder name rather than asking cold.** Run `atoa business list --output json` and
 `atoa whoami --output json` first. For a limited company the account is held in the

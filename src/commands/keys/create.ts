@@ -4,6 +4,7 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {saveSdkKey} from "../../lib/sdk-key-file";
+import {isInteractive} from "../../lib/output";
 
 interface CreateKeyResponse {
   apiSecret?: string;
@@ -22,7 +23,9 @@ export default defineCommand({
   }),
   run: runWithContext<CreateArgs>(async (ctx, args) => {
     const env = ctx.env;
-    const tty = Boolean(process.stdin.isTTY);
+    // stdout, not stdin — a prompt drawn into a redirected stdout is invisible to the person
+    // meant to answer it.
+    const tty = isInteractive(ctx.formatExplicit);
 
     // The backend requires an "API Access name" — a human label for the key.
     const name = (
