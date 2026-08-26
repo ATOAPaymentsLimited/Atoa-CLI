@@ -5,6 +5,7 @@ import {AtoaError} from "../../lib/errors";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {saveSdkKey} from "../../lib/sdk-key-file";
 import {isInteractive} from "../../lib/output";
+import {t} from "../../lib/i18n";
 
 interface CreateKeyResponse {
   apiSecret?: string;
@@ -31,7 +32,9 @@ export default defineCommand({
     const name = (
       args.name ?? (tty ? await input({message: 'Key name (a label to recognise this key, e.g. "CI server"):'}) : "")
     ).trim();
-    if (!name) throw new AtoaError("an API key name is required — pass --name or run in a terminal", "validation");
+    // Named like every other missing flag: "run in a terminal" stopped being the fix once this
+    // stopped prompting under --output, where the caller is in a terminal and still gets here.
+    if (!name) throw new AtoaError(t("flagRequired", {flag: "name"}), "validation");
 
     if (ctx.dryRun) {
       ctx.print({...V1_ROUTES.apiKeys.create, pathParams: {env}, body: {name}});

@@ -3,6 +3,9 @@ import {promises as fs} from "fs";
 import {join} from "path";
 import {tmpdir} from "os";
 
+// Mocked so a regression can never hang the suite waiting on real input.
+vi.mock("@inquirer/prompts", () => ({input: vi.fn(async () => ""), confirm: vi.fn(async () => true)}));
+
 /**
  * keys/revoke + keys/regenerate use `runWithContext`, so we mock
  * `lib/context.buildContext` to control the active profile + http.
@@ -27,6 +30,8 @@ const mock = vi.hoisted(() => {
   return {
     requests,
     printed,
+    /** `isInteractive` is stdout-a-TTY AND no explicit --output; both halves must be set to prompt. */
+    formatExplicit: true,
     setActiveEnv(e: "sandbox" | "production") {
       activeEnv = e;
     },
@@ -38,6 +43,7 @@ const mock = vi.hoisted(() => {
       printed.length = 0;
       activeEnv = "sandbox";
       regenerateBody = {apiSecret: "new_sandbox_secret_xyz", sdkAccessId: "sda_sb"};
+      this.formatExplicit = true;
     },
     buildContext: async (opts: any) => ({
       env: activeEnv,
@@ -60,6 +66,7 @@ const mock = vi.hoisted(() => {
         }
       },
       format: "json",
+      formatExplicit: mock.formatExplicit,
       verbose: false,
       dryRun: opts.dryRun ?? false,
       yes: opts.yes ?? true,
@@ -77,6 +84,8 @@ vi.mock("../../src/lib/context", async () => {
 
 import revoke from "../../src/commands/keys/revoke";
 import regenerate from "../../src/commands/keys/regenerate";
+import create from "../../src/commands/keys/create";
+import * as prompts from "@inquirer/prompts";
 import {sdkKeyFilePath} from "../../src/lib/sdk-key-file";
 
 let home: string;
@@ -191,5 +200,53 @@ describe("keys regenerate", () => {
   it("explicit positional id rotates that specific key", async () => {
     await (regenerate.run as any)({args: {id: "specific-id-999", yes: true}, rawArgs: ["specific-id-999"]});
     expect(mock.requests[0].pathParams).toEqual({keyId: "specific-id-999"});
+  });
+});
+
+/**
+ * `keys create` prompts for the key name when one is not supplied. That decision used to read
+ * stdin, which says a name could be typed but not that anyone would see the request for it —
+ * so `--output json` in a terminal opened a prompt instead of reporting the missing flag.
+ */
+describe("keys create — --output json never opens a prompt", () => {
+  const origStdin = process.stdin.isTTY;
+  const origStdout = process.stdout.isTTY;
+
+  beforeEach(() => {
+    mock.reset();
+    process.exitCode = 0;
+    vi.clearAllMocks();
+    // A real terminal: both streams are TTYs, so only --output distinguishes this run.
+    (process.stdin as any).isTTY = true;
+    (process.stdout as any).isTTY = true;
+  });
+
+  afterEach(() => {
+    (process.stdin as any).isTTY = origStdin;
+    (process.stdout as any).isTTY = origStdout;
+  });
+
+  it("names the missing flag instead of asking for it", async () => {
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (create.run as any)({args: {output: "json"}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(prompts.input).not.toHaveBeenCalled();
+    expect(out).toContain("--name");
+    expect(process.exitCode).toBe(3);
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it("still prompts in a terminal when no --output was given", async () => {
+    mock.formatExplicit = false;
+    vi.mocked(prompts.input).mockResolvedValueOnce("CI server");
+
+    await (create.run as any)({args: {dryRun: true}, rawArgs: []});
+
+    // The negative control: the fix must not turn every terminal run into a flag requirement.
+    expect(prompts.input).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(0);
   });
 });

@@ -652,6 +652,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
         send: V1_ROUTES.onboarding.updateContact,
         verify: V1_ROUTES.onboarding.updateContact,
         body: contactBody,
+        interactive,
         onOtpSent: () => process.stderr.write(t("otpSentToPhone"))
       });
       process.stderr.write(otpUsed ? t("phoneVerified") : t("phoneSaved"));
