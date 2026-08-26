@@ -104,6 +104,9 @@ report this state the same way.
   the name rule and `--env`).
 
 `--profile <name>` selects a stored account. If more than one exists, ask which before writing.
+Everywhere but `signup`, a name that doesn't exist is an error. **On `signup` it means the
+opposite** — naming a profile that doesn't exist yet is what creates a *new account*, rather than
+adding a business to the one you are already signed in as (see **Signing up a new account**).
 
 Start every session with `atoa whoami --output json` and say whose account you are acting on.
 
@@ -448,7 +451,13 @@ same command **without `--otp`** — it resumes from where it stopped.
   new one *once*. Do not sit in a request-a-code loop — repeated sends are rate-limited per minute
   and repeated wrong codes block the account for an hour. Exit 5 means stop and wait.
 - Re-running on a finished business reports "Nothing to do" and creates nothing. Pass
-  `--start-new` to deliberately create a second business.
+  `--start-new` to deliberately create a second business **on the account already signed in**.
+- **A second, separate account needs `--profile <new-name>`.** If the machine is already signed in,
+  `signup` reuses that session and **`--email` is ignored** — you would add a business to the
+  existing account while believing you had created a new one. Naming a profile that does not exist
+  yet is the only thing that forces account creation:
+  `atoa signup --profile acme-two --email new@example.com --output json`. Check `atoa profile list`
+  first, and tell the user which account they are about to end up on.
 - `--from-step 2|3` resumes a partially-completed onboarding.
 
 ## Hand this one back
