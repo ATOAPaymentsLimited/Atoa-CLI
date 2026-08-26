@@ -1,5 +1,6 @@
 import {describe, it, expect, vi} from "vitest";
 import {resolveFormat, print, stripControlChars} from "../../src/lib/output";
+import {AtoaError, exitCodeFor} from "../../src/lib/errors";
 
 describe("stripControlChars", () => {
   it("strips ANSI/OSC escape introducers and other control chars from server data", () => {
@@ -70,5 +71,32 @@ describe("print", () => {
     print(null, "json");
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+/**
+ * The exit code an agent sees for a bad --output. It was a plain Error, which the command handler
+ * still caught — but exitCodeFor(undefined) is 1, so the most likely typo on the one flag every
+ * agent passes read as a server failure ("stop") rather than bad input ("fix and retry").
+ */
+describe("resolveFormat rejects an unknown format as invalid input", () => {
+  it("throws an AtoaError whose kind maps to exit 3", () => {
+    let thrown: unknown;
+    try {
+      resolveFormat("bogus");
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(AtoaError);
+    expect((thrown as AtoaError).kind).toBe("validation");
+    expect(exitCodeFor((thrown as AtoaError).kind)).toBe(3);
+  });
+
+  it.each(["json", "table", "yaml"])("accepts %s", (fmt) => {
+    expect(resolveFormat(fmt)).toBe(fmt);
+  });
+
+  it("defaults to table when nothing was asked for", () => {
+    expect(resolveFormat(undefined)).toBe("table");
   });
 });

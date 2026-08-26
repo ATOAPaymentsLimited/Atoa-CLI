@@ -3,7 +3,7 @@ import {t} from "../../lib/i18n";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages, presentList} from "../../lib/list-view";
-import {projectRole} from "./_shared";
+import {projectRole, type RoleRow} from "./_shared";
 
 export default defineCommand({
   meta: {name: "list", description: t("cmdRolesList")},
@@ -16,7 +16,7 @@ export default defineCommand({
 
     // fetchAllPages unwraps the Pagination envelope and pages through it. Projected before
     // display so the drill-in shows permission names rather than the nested catalogue records.
-    const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)).map((r) => projectRole(r as never));
+    const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)).map((r) => projectRole(r as RoleRow));
     await presentList(ctx, rows, {
       title: t("titleRoles"),
       line: (r) => [r["name"], r["roleScopeType"], r["description"]].filter(Boolean).join("  ·  ")

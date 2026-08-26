@@ -128,7 +128,7 @@ import addonsUpgrade from "../../src/commands/addons/upgrade";
 import addonsDowngrade from "../../src/commands/addons/downgrade";
 import addonsCancelDowngrade from "../../src/commands/addons/cancel-downgrade";
 import addonsIndex from "../../src/commands/addons";
-import {downgradeBlockers} from "../../src/commands/addons/_shared";
+import {downgradeBlockers, formatFeatureUsage} from "../../src/commands/addons/_shared";
 
 const paths = () => mock.requests.map((r) => r.path);
 
@@ -269,6 +269,36 @@ describe("downgradeBlockers (mirrors the backend's downgrade eligibility rule)",
 
   it("treats a null limit as unlimited", () => {
     expect(downgradeBlockers([{featureType: "MULTI_STORE", usage: 99}], asPlan(PLANS.advanced))).toEqual([]);
+  });
+});
+
+/**
+ * The API distinguishes three states: a feature absent from the plan is refused with
+ * ADDON_UPGRADE_REQUIRED, a feature in the plan with a falsy limit is never capped, and a numeric
+ * limit is enforced. Rendering the first two the same way would tell a merchant they are out of
+ * quota on something the API would happily allow. Shapes taken from a live `addons list`.
+ */
+describe("formatFeatureUsage", () => {
+  it("shows usage against a numeric cap", () => {
+    expect(formatFeatureUsage(1, {limit: 15, overlimitCharges: 0})).toBe("1 / 15");
+  });
+
+  it("marks a feature the plan does not include", () => {
+    expect(formatFeatureUsage(0, undefined)).toBe("0 (not in this plan)");
+  });
+
+  // Higher tiers really do send {included: true, limit: null} for some features.
+  it("treats an absent limit on an included feature as unlimited", () => {
+    expect(formatFeatureUsage(0, {limit: null, overlimitCharges: 0})).toBe("0 (unlimited)");
+  });
+
+  // The backend caps on `!featureLimit`, so 0 is uncapped there — "0 / 0" would read as a refusal.
+  it("treats a zero limit as unlimited, as the backend does", () => {
+    expect(formatFeatureUsage(3, {limit: 0, overlimitCharges: 0})).toBe("3 (unlimited)");
+  });
+
+  it("names the per-unit charge when extras are billable rather than blocked", () => {
+    expect(formatFeatureUsage(6, {limit: 5, overlimitCharges: 2})).toContain("5");
   });
 });
 

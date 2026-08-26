@@ -8,6 +8,16 @@ import {BackendErrorCode} from "../../lib/enums";
 import {t} from "../../lib/i18n";
 import {isInteractive, renderKeyValues} from "../../lib/output";
 import {withOtp} from "../../lib/otp";
+import {resolveField} from "../../lib/prompt-field";
+import {
+  validateSortCode,
+  validateBankAccountNumber,
+  normaliseSortCode,
+  normaliseAccountNumber
+} from "../../lib/validators";
+
+/** The only company type whose bank account is held in the business's name rather than a person's. */
+const COMPANY_LTD = "company_ltd";
 
 type BankAddArgs = CommonOptions & {
   bankName?: string;
@@ -17,6 +27,8 @@ type BankAddArgs = CommonOptions & {
   nickName?: string;
   currency?: string;
   setPrimary?: boolean;
+  confirmPayeeName?: boolean;
+  otp?: string;
 };
 
 /** Subset of the /api/institutions response we use. */
@@ -34,8 +46,8 @@ export default defineCommand({
     name: "add",
     description: t("cmdBankAdd")
   },
-  // Flags are optional: omitted fields are prompted for in a terminal. Pass them to script the
-  // command in a non-interactive shell (the OTP step still needs a TTY).
+  // Flags are optional: omitted fields are prompted for when stdout is a terminal and no --output
+  // was given. Pass them to script the command — including --otp, which skips the OTP prompt too.
   args: withCommonArgs({
     bankName: {type: "string", description: t("argBankName")},
     sortCode: {type: "string", description: t("argSortCodePrompted")},
@@ -43,14 +55,15 @@ export default defineCommand({
     accountHolderName: {type: "string", description: t("argAccountHolderNamePrompted")},
     nickName: {type: "string", description: t("argNickName")},
     currency: {type: "string", description: t("argCurrency")},
-    setPrimary: {type: "boolean", description: t("argSetPrimary")}
+    setPrimary: {type: "boolean", description: t("argSetPrimary")},
+    confirmPayeeName: {type: "boolean", description: t("argConfirmPayeeName")},
+    otp: {type: "string", description: t("argOtp")}
   }),
   run: runWithContext<BankAddArgs>(async (ctx, args) => {
-    const tty = Boolean(process.stdin.isTTY);
-
-    if (!tty && (!args.bankName || !args.sortCode || !args.accountNumber)) {
-      throw new AtoaError(t("bankAddInteractiveOnly"), "validation");
-    }
+    // stdout, not stdin: a prompt renders to stdout, so `--output json > file` in a terminal would
+    // draw the question into the file and leave the user staring at a silent shell. Each field now
+    // reports itself missing by name instead of one blanket "this command is interactive".
+    const tty = isInteractive(ctx.formatExplicit);
 
     const body = await collectAccountFields(ctx, args, tty);
 
@@ -65,6 +78,8 @@ export default defineCommand({
     const {data, otpUsed} = await withOtp(ctx.http, {
       send: V1_ROUTES.bank.add,
       body,
+      otp: args.otp,
+      interactive: tty,
       onOtpSent: () => process.stderr.write(t("otpSentToContact")),
       resolveRetry: async (err) => {
         if (err.errorCode !== BackendErrorCode.COP_VERIFIED_WITH_FUZZY_MATCH) return null;
@@ -72,6 +87,14 @@ export default defineCommand({
         const entered =
           (err.additionalData?.["registeredName"] as string) || (body["accountHolderName"] as string) || "";
         if (entered) process.stderr.write(t("accountNameDiffers", {entered}));
+
+        // Pre-authorised, or asked — never assumed. Throwing instead would look like the safer
+        // default, but the OTP has already been verified by the time this runs, so it would spend
+        // a live code on a yes/no. Accepting the bank's name cannot misroute anything: sort code
+        // and account number decide where the money lands, the name is only the check against it.
+        if (args.confirmPayeeName) return {confirmFuzzyCheck: true};
+        if (!tty) throw new AtoaError(t("copConfirmRequired", {registered}), "validation");
+
         const ok = await confirm({
           message: t("useBankRegisteredName", {registered}),
           default: false
@@ -112,6 +135,11 @@ async function pickBank(
 ): Promise<{bankName: string; bankCode?: string}> {
   if (args.bankName?.trim()) return {bankName: args.bankName.trim()};
 
+  // Checked before the fetch: the institution list exists only to be picked from, so with nobody
+  // to pick it is a wasted round trip followed by the same failure. Named like every other missing
+  // flag rather than a bare "bank name is required".
+  if (!tty) throw new AtoaError(t("flagRequired", {flag: "bank-name"}), "validation");
+
   let banks: BankInstitution[] = [];
   try {
     const {data} = await ctx.http.request({...V1_ROUTES.institutions.list});
@@ -137,7 +165,8 @@ async function pickBank(
     };
   }
 
-  const typed = (tty ? await input({message: t("labelBankName")}) : "").trim();
+  // Reached only on a terminal (guarded above), so the empty case here is a blank answer.
+  const typed = (await input({message: t("labelBankName")})).trim();
   if (!typed) throw new AtoaError(t("bankNameRequired"), "validation");
   return {bankName: typed};
 }
@@ -148,15 +177,30 @@ async function collectAccountFields(
   args: BankAddArgs,
   tty: boolean
 ): Promise<Record<string, unknown>> {
-  const required = async (flag: string | undefined, message: string, label: string): Promise<string> => {
-    const value = (flag ?? (tty ? await input({message}) : "")).trim();
-    if (!value) throw new AtoaError(t("fieldRequired", {field: label}), "validation");
-    return value;
-  };
-
   const {bankName, bankCode} = await pickBank(ctx, args, tty);
-  const sortCode = (await required(args.sortCode, t("promptSortCode"), t("labelSortCode"))).replace(/\s+/g, "");
-  const accountNumber = await required(args.accountNumber, t("promptAccountNumber"), t("labelAccountNumber"));
+
+  // Same digits-only, exact-length rule as direct-debit's account fields — shared in
+  // validators.ts so the two commands can't drift apart. Normalised on the way out: the rule
+  // accepts "12-34-56", the backend does not.
+  const sortCode = normaliseSortCode(
+    await resolveField({
+      value: args.sortCode,
+      flag: "sort-code",
+      message: t("promptSortCode"),
+      rule: validateSortCode,
+      interactive: tty
+    })
+  );
+
+  const accountNumber = normaliseAccountNumber(
+    await resolveField({
+      value: args.accountNumber,
+      flag: "account-number",
+      message: t("promptAccountNumber"),
+      rule: validateBankAccountNumber,
+      interactive: tty
+    })
+  );
 
   // Confirm the account number on interactive entry — a typo guard.
   if (tty && !args.accountNumber) {
@@ -164,7 +208,8 @@ async function collectAccountFields(
     if (reEntered !== accountNumber) throw new AtoaError(t("accountNumbersDoNotMatch"), "validation");
   }
 
-  // Account holder name prefills from the signed-in user's profile name — press Enter to accept.
+  // Prefilled with the legal business name — press Enter to accept, or type over it for an
+  // account held in a different name.
   const accountHolderName =
     args.accountHolderName?.trim() ||
     (tty
@@ -196,12 +241,31 @@ async function collectAccountFields(
   };
 }
 
-/** Best-effort prefill for the account holder name: the signed-in user's profile name. */
+/**
+ * Best-effort prefill for the account holder name: a limited company's account is held in its legal
+ * name, anyone else's in their own. Getting this wrong is not cosmetic — the name is what
+ * Confirmation of Payee is matched against.
+ *
+ * An unset company type falls back to the person's name rather than assuming a company; absence is
+ * not evidence of one, and the prompt stays editable either way.
+ *
+ * One request covers it: this route returns the signed-in user alongside the business.
+ */
 async function defaultHolderName(ctx: CommandContext): Promise<string | undefined> {
   try {
-    const {data} = await ctx.http.request({...V1_ROUTES.identity.get});
-    const {firstName, lastName} = (data ?? {}) as {firstName?: string; lastName?: string};
-    return [firstName, lastName].filter(Boolean).join(" ") || undefined;
+    const {data} = await ctx.http.request({...V1_ROUTES.onboarding.getBusiness});
+    const {user, business} = (data ?? {}) as {
+      user?: {firstName?: string; lastName?: string};
+      business?: {businessInfo?: {legalBusinessName?: string; companyType?: string}};
+    };
+
+    const {legalBusinessName, companyType} = business?.businessInfo ?? {};
+    // Stored uppercase (COMPANY_LTD), compared lowercase.
+    if (legalBusinessName?.trim() && companyType?.toLowerCase().includes(COMPANY_LTD)) {
+      return legalBusinessName.trim();
+    }
+
+    return [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || undefined;
   } catch {
     return undefined;
   }

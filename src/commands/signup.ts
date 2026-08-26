@@ -3,7 +3,7 @@
 /* eslint-disable max-lines */
 import {defineCommand} from "citty";
 import {randomUUID} from "node:crypto";
-import {input, confirm, select, search} from "@inquirer/prompts";
+import {input, confirm, select} from "@inquirer/prompts";
 import {withCommonArgs, type CommonOptions} from "./_common";
 import {V1_ROUTES} from "../lib/v1-routes";
 import {AtoaError, printError, exitCodeFor} from "../lib/errors";
@@ -28,6 +28,8 @@ import {
 } from "../lib/config-store";
 import {withOtp} from "../lib/otp";
 import {isInteractive, renderKeyValues} from "../lib/output";
+import {resolveField, resolveChoice} from "../lib/prompt-field";
+import {t} from "../lib/i18n";
 import {
   isValidEmail,
   validateName,
@@ -43,21 +45,58 @@ import {
 } from "../lib/validators";
 import {DEFAULT_PHONE_COUNTRY_CODE} from "../lib/constants";
 
+/** Sentinel: a code was sent and there was no terminal to enter it in. Surfaced as exit 9. */
+const OTP_SENT = "__otp_sent__";
+
 type SignupArgs = CommonOptions & {
   email?: string;
+  otp?: string;
   fromStep?: string;
   deviceName?: string;
+  acceptTerms?: boolean;
+  marketing?: boolean;
+  startNew?: boolean;
+  businessName?: string;
+  industry?: string;
+  monthlyTurnover?: string;
+  vatNumber?: string;
+  websiteUrl?: string;
+  businessStructure?: string;
+  firstName?: string;
+  lastName?: string;
+  phoneCountryCode?: string;
+  phoneNumber?: string;
+  postalCode?: string;
+  addressLine1?: string;
+  addressLine2?: string;
 };
 
 export default defineCommand({
   meta: {
     name: "signup",
-    description: "Create a new Atoa account (email + OTP) and onboard a business — no prior login needed"
+    description: t("cmdSignup")
   },
   args: withCommonArgs({
-    email: {type: "string", description: "email to sign up with (skips the prompt)"},
-    fromStep: {type: "string", description: "resume from step N (2-3); requires businessId already set"},
-    deviceName: {type: "string", description: "label for this device in your Atoa sessions"}
+    email: {type: "string", description: t("argSignupEmail")},
+    otp: {type: "string", description: t("argSignupOtp")},
+    fromStep: {type: "string", description: t("argSignupFromStep")},
+    deviceName: {type: "string", description: t("argSignupDeviceName")},
+    acceptTerms: {type: "boolean", description: t("argSignupAcceptTerms")},
+    marketing: {type: "boolean", description: t("argSignupMarketing")},
+    startNew: {type: "boolean", description: t("argSignupStartNew")},
+    businessName: {type: "string", description: t("argSignupBusinessName")},
+    industry: {type: "string", description: t("argSignupIndustry")},
+    monthlyTurnover: {type: "string", description: t("argSignupTurnover")},
+    vatNumber: {type: "string", description: t("argSignupVat")},
+    websiteUrl: {type: "string", description: t("argSignupWebsite")},
+    businessStructure: {type: "string", description: t("argSignupStructure")},
+    firstName: {type: "string", description: t("argSignupFirstName")},
+    lastName: {type: "string", description: t("argSignupLastName")},
+    phoneCountryCode: {type: "string", description: t("argSignupPhoneCc")},
+    phoneNumber: {type: "string", description: t("argSignupPhone")},
+    postalCode: {type: "string", description: t("argSignupPostalCode")},
+    addressLine1: {type: "string", description: t("argSignupAddress1")},
+    addressLine2: {type: "string", description: t("argSignupAddress2")}
   }),
   async run({args: cittyArgs}) {
     const args = cittyArgs as unknown as SignupArgs;
@@ -66,7 +105,13 @@ export default defineCommand({
 
       // Step 0: ensure we have a session. A brand-new user has none → create the
       // account here (email + OTP). If a session already exists, this is a no-op.
-      await ensureSignedUp(args);
+      // The code arrives out of band, so without a terminal to ask for it the run stops here
+      // having sent one. Not a failure, but nothing was created either — its own exit code says
+      // "re-run with --otp", which `bank add` also uses for the same state.
+      if ((await ensureSignedUp(args)) === OTP_SENT) {
+        process.exitCode = exitCodeFor("otp_required");
+        return;
+      }
 
       // allowIncomplete: a freshly-created account has no businessId until step-1 below.
       const ctx = await buildContext(args, {allowIncomplete: true});
@@ -109,29 +154,41 @@ async function ensureSignedUp(args: SignupArgs): Promise<string | undefined> {
  *   source=CLI + device → CLI-source JWT). Stores the session and activates the profile.
  */
 async function otpSignup(args: SignupArgs): Promise<string> {
-  if (!process.stdin.isTTY) {
-    throw new AtoaError("atoa signup needs an interactive terminal (email + OTP). Run it in a terminal.", "validation");
-  }
+  const interactive = isInteractive(args.output !== undefined);
 
-  process.stderr.write("\nCreate your Atoa account\n─────────────────────────────────────────\n");
-  const email = (args.email || (await input({message: "Email address:"}))).trim();
-  if (!isValidEmail(email)) throw new AtoaError("Please enter a valid email address", "validation");
+  process.stderr.write(t("signupHeading"));
+  const email = await resolveField({
+    value: args.email,
+    flag: "email",
+    message: t("labelEmailAddressPrompt"),
+    rule: (v) => (isValidEmail(v.trim()) ? true : t("emailError")),
+    interactive
+  });
 
   // No credentials yet → a bare (auth: "none") client for the public auth endpoints.
   const http = buildHttpClient({baseUrl: resolveBaseUrl(), authHeader: "unused", verbose: !!args.verbose});
 
-  await http.request({...V1_ROUTES.auth.otpSend, body: {email}});
-  process.stderr.write(`An OTP has been sent to ${email}.\n`);
+  // Only send when we don't already hold a code: a second send would invalidate the one the
+  // caller is about to submit, and counts against the per-hour allowance.
+  if (!args.otp?.trim()) {
+    await http.request({...V1_ROUTES.auth.otpSend, body: {email}});
+    process.stderr.write(t("otpSentTo", {email}));
+    if (!interactive) {
+      process.stderr.write(t("otpResumeWithFlag", {email}));
+      return OTP_SENT;
+    }
+  }
 
-  // Verify the OTP → otpVerifiedToken (retry on wrong code).
-  const MAX = 5;
+  // Verify the OTP → otpVerifiedToken (retry on wrong code). A supplied --otp gets one attempt:
+  // there is nobody to retype it, and re-running is the caller's retry.
+  const MAX = args.otp?.trim() ? 1 : 5;
   let otpVerifiedToken = "";
   for (let attempt = 1; attempt <= MAX; attempt++) {
-    const otp = (await input({message: `OTP (attempt ${attempt}/${MAX}):`})).trim();
+    const otp = args.otp?.trim() || (await input({message: t("labelOtpAttempt", {attempt, max: MAX})})).trim();
     try {
       const res = await http.request({...V1_ROUTES.auth.otpVerify, body: {email, otp}});
       const token = (res.data as {otpVerifiedToken?: string})?.otpVerifiedToken;
-      if (!token) throw new AtoaError("OTP verification did not return a token.", "auth", {requestId: res.requestId});
+      if (!token) throw new AtoaError(t("otpNoTokenReturned"), "auth", {requestId: res.requestId});
       otpVerifiedToken = token;
       break;
     } catch (err) {
@@ -177,7 +234,7 @@ async function otpSignup(args: SignupArgs): Promise<string> {
   });
   const grant = (signRes.data ?? {}) as {accessToken?: string; refreshToken?: string};
   if (!grant.accessToken || !grant.refreshToken) {
-    throw new AtoaError("Signup did not return tokens — contact support if this persists.", "auth", {
+    throw new AtoaError(t("signupNoTokens"), "auth", {
       requestId: signRes.requestId
     });
   }
@@ -249,7 +306,7 @@ async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Pr
   // Explicit override — power-user path, no prompt.
   if (args.fromStep) {
     const n = parseInt(args.fromStep, 10);
-    if (isNaN(n) || n < 1 || n > 3) throw new AtoaError("--from-step must be a number between 1 and 3", "validation");
+    if (isNaN(n) || n < 1 || n > 3) throw new AtoaError(t("fromStepRange"), "validation");
     if (n === 1) return {kind: "start", fromStep: 1};
     const bizId = await getActiveBusinessId(ctx.profileName);
     if (!bizId) {
@@ -274,33 +331,43 @@ async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Pr
   try {
     record = await fetchBusinessRecord(ctx, bizId);
   } catch {
-    throw new AtoaError("Couldn't load your in-progress signup. Check your connection and try again.", "network");
+    throw new AtoaError(t("resumeLoadFailed"), "network");
   }
 
   const state = onboardingResumeState(record);
   const name = (record.businessInfo?.legalBusinessName as string) || "your business";
 
+  // With nobody to ask, both branches below take the safe default — resume rather than start over,
+  // and don't start a second business. --start-new is how a caller asks for the other branch
+  // explicitly, so creating one is never something an unattended re-run does by itself.
+  const interactive = isInteractive(ctx.formatExplicit);
+  const wantsNew = Boolean(args.startNew);
+
   if (state.kind === "resume") {
-    const choice = await select({
-      message: `You have an in-progress signup for "${name}".`,
-      choices: [
-        {name: `Continue where you left off (step ${state.step} of 4)`, value: "continue"},
-        {name: "Start a new business from scratch", value: "new"}
-      ]
-    });
+    const choice =
+      interactive && !wantsNew
+        ? await select({
+            message: t("resumePrompt", {name}),
+            choices: [
+              {name: t("resumeContinue", {step: state.step}), value: "continue"},
+              {name: t("resumeStartNew"), value: "new"}
+            ]
+          })
+        : wantsNew
+          ? "new"
+          : "continue";
     if (choice === "continue") return {kind: "start", fromStep: state.step, seedInfo: record.businessInfo};
     return {kind: "start", fromStep: 1, startingNew: true};
   }
 
   // Nothing to resume: fully onboarded, or KYB has locked the business past editing.
   process.stderr.write(
-    (state.kind === "locked"
-      ? `"${name}" is already ${state.status.replace(/_/g, " ").toLowerCase()} and can't be edited from the CLI.`
-      : `"${name}" is already fully onboarded.`) + "\n"
+    state.kind === "locked"
+      ? t("businessLocked", {name, status: state.status.replace(/_/g, " ").toLowerCase()})
+      : t("businessAlreadyOnboarded", {name})
   );
-  if (!(await confirm({message: "Start a new business from scratch?", default: false}))) {
-    return {kind: "done", message: "Nothing to do."};
-  }
+  const startNew = wantsNew || (interactive && (await confirm({message: t("resumeStartNewConfirm"), default: false})));
+  if (!startNew) return {kind: "done", message: t("nothingToDo")};
   return {kind: "start", fromStep: 1, startingNew: true};
 }
 
@@ -314,40 +381,42 @@ async function resolveOnboardingStart(ctx: CommandContext, args: SignupArgs): Pr
  *
  * Returns the marketing preference. The two required ones throw rather than return.
  */
-async function collectConsent(): Promise<boolean> {
-  const acceptAll = await confirm({
-    message:
-      "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/) " +
-      "and Terms of Service (https://paywithatoa.co.uk/terms/), and would like marketing and product updates",
-    default: true
-  });
+async function collectConsent(args: SignupArgs, interactive: boolean): Promise<boolean> {
+  // Without a terminal the acceptance has to be explicit — a generic "skip prompts" flag must not
+  // stand in for agreeing to the Privacy Policy and Terms of Service.
+  if (!interactive) {
+    if (!args.acceptTerms) throw new AtoaError(t("signupNeedsAcceptTerms"), "validation");
+    return Boolean(args.marketing);
+  }
+  if (args.acceptTerms) return Boolean(args.marketing);
+
+  const acceptAll = await confirm({message: t("consentAcceptAll"), default: true});
   if (acceptAll) return true;
 
   const acceptPrivacy = await confirm({
-    message: "I accept Atoa's Privacy Policy (https://paywithatoa.co.uk/atoa-business-privacy-policy/)",
+    message: t("consentPrivacy"),
     default: true
   });
   if (!acceptPrivacy) {
-    throw new AtoaError("You must accept the Privacy Policy to continue.", "validation");
+    throw new AtoaError(t("consentPrivacyRequired"), "validation");
   }
 
   const acceptTos = await confirm({
-    message: "I accept Atoa's Terms of Service (https://paywithatoa.co.uk/terms/)",
+    message: t("consentTerms"),
     default: true
   });
   if (!acceptTos) {
-    throw new AtoaError("You must accept the Terms of Service to continue.", "validation");
+    throw new AtoaError(t("consentTermsRequired"), "validation");
   }
 
-  return confirm({message: "I would like to get marketing and product updates from Atoa", default: false});
+  return confirm({message: t("consentMarketing"), default: false});
 }
 
 /** The onboarding wizard (steps 1–4), run with an authed context. */
 async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<void> {
-  // Wizard is interactive-only
-  if (!process.stdin.isTTY) {
-    throw new AtoaError("atoa signup is an interactive wizard and requires a TTY. Run it in a terminal.", "validation");
-  }
+  // Every field below resolves from a flag or a prompt, so this runs with or without a terminal;
+  // without one, a missing required field fails naming its flag rather than hanging.
+  const interactive = isInteractive(ctx.formatExplicit);
 
   // Decide where to start: an explicit --from-step, or auto-detect an in-progress
   // business and let the user continue it (jump to the first incomplete step) or start over.
@@ -359,8 +428,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
   const fromStep = start.fromStep;
   const startingNewOverExisting = start.startingNew ?? false;
 
-  process.stderr.write("Atoa onboarding wizard\n");
-  process.stderr.write("─────────────────────────────────────────\n");
+  process.stderr.write(t("onboardingHeading"));
 
   // Captured in step 1 (business name) so we can rename the profile to the business slug at the end.
   let createdBusinessName: string | undefined;
@@ -408,9 +476,15 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
 
   // ── Step 1: Business details (name, industry, turnover, VAT, website, consent) ──
   if (fromStep <= 1) {
-    process.stderr.write("\nStep 1 of 3 — Let's set your account up\n");
+    process.stderr.write(t("signupStep1"));
 
-    const legalBusinessName = await input({message: "Business name:", validate: validateBusinessName});
+    const legalBusinessName = await resolveField({
+      value: args.businessName,
+      flag: "business-name",
+      message: t("labelBusinessName"),
+      rule: validateBusinessName,
+      interactive
+    });
 
     // Industry / business type is a server-side lookup (env-specific ids); fetch and pick.
     // Deduplicated by name — the table carries
@@ -423,35 +497,56 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
     if (types.length) {
       const seen = new Set<string>();
       const uniqueTypes = types.filter((t) => !seen.has(t.name) && seen.add(t.name));
-      const id = await search({
-        message: "Business industry:",
-        // Type-to-filter: the list is long enough that a plain select is unusable.
-        source: (term) => {
-          const q = (term ?? "").toLowerCase();
-          return uniqueTypes.filter((t) => t.name.toLowerCase().includes(q)).map((t) => ({value: t.id, name: t.name}));
-        }
+      // Searchable: the list is long enough that a plain select is unusable on a TTY.
+      const id = await resolveChoice({
+        value: args.industry,
+        flag: "industry",
+        message: t("labelBusinessIndustry"),
+        choices: uniqueTypes.map((bt) => ({value: bt.id, name: bt.name})),
+        interactive,
+        searchable: true
       });
-      businessType = uniqueTypes.find((t) => t.id === id);
+      businessType = uniqueTypes.find((bt) => bt.id === id);
     }
 
     // Monthly turnover — server-defined bands. The display string itself is what's persisted.
     // Required, and collected in step 1.
     const ranges = (await ctx.http.request({...V1_ROUTES.onboarding.transactionRanges})).data as string[];
     if (ranges.length) {
-      businessInfo.averageMonthlyTransaction = await select({
-        message: "Monthly turnover:",
-        choices: ranges.map((r) => ({value: r, name: r}))
+      businessInfo.averageMonthlyTransaction = await resolveChoice({
+        value: args.monthlyTurnover,
+        flag: "monthly-turnover",
+        message: t("labelMonthlyTurnover"),
+        choices: ranges.map((r) => ({value: r, name: r})),
+        interactive
       });
     }
 
     // VAT is required at signup.
-    businessInfo.vatNumber = normaliseVatNumber(await input({message: "VAT number:", validate: validateVatNumber}));
+    businessInfo.vatNumber = normaliseVatNumber(
+      await resolveField({
+        value: args.vatNumber,
+        flag: "vat-number",
+        message: t("labelVatNumber"),
+        rule: validateVatNumber,
+        interactive
+      })
+    );
 
     // Website is optional — blank is sent as undefined (omitted), not an empty string.
-    const websiteUrl = (await input({message: "Website URL (optional):", validate: validateWebsiteUrl})).trim();
+    const websiteUrl = (
+      (await resolveField({
+        value: args.websiteUrl,
+        flag: "website-url",
+        message: t("labelWebsiteUrlOptional"),
+        rule: validateWebsiteUrl,
+        interactive,
+        optional: true
+      })) ?? ""
+    ).trim();
     if (websiteUrl) businessInfo.webSiteUrl = websiteUrl;
 
-    const allowMarketingEmails = await collectConsent();
+    const allowMarketingEmails = await collectConsent(args, interactive);
 
     businessInfo.legalBusinessName = legalBusinessName;
     businessInfo.tradingName = legalBusinessName;
@@ -472,7 +567,7 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
       });
     const businessId = (res.data as {business?: {id?: string}})?.business?.id;
     if (!businessId) {
-      throw new AtoaError("Create-business response did not include a business id.", "generic");
+      throw new AtoaError(t("createBusinessNoId"), "generic");
     }
     await setActiveBusinessId(ctx.profileName, businessId);
     createdBusinessName = legalBusinessName;
@@ -487,48 +582,69 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
 
   // ── Step 2: Business structure ───────────────────────────────────────────
   if (fromStep <= 2) {
-    process.stderr.write("\nStep 2 of 3 — What's your business type?\n");
+    process.stderr.write(t("signupStep2"));
     // Product restricts CLI signup to Limited Company + Charity (the backend enum also has
     // SOLE_TRADER — do not re-add without product sign-off).
-    const companyType = await select({
-      message: "Business structure:",
+    const companyType = await resolveChoice({
+      value: args.businessStructure,
+      flag: "business-structure",
+      message: t("labelBusinessStructure"),
       choices: [
         {name: "Limited Company", value: "COMPANY_LTD"},
         {name: "Charity", value: "CHARITY"}
-      ]
+      ],
+      interactive
     });
     businessInfo.companyType = companyType;
     await ctx.http.request({...V1_ROUTES.onboarding.updateBusiness, body: {businessInfo}});
-    process.stderr.write("✓ Business structure saved.\n");
+    process.stderr.write(t("businessStructureSaved"));
   }
 
   // ── Step 3: Personal details ─────────────────────────────────────────────
   if (fromStep <= 3) {
-    process.stderr.write("\nStep 3 of 3 — Your business contact details\n");
-    const firstName = await input({
-      message: "First name:",
+    process.stderr.write(t("signupStep3"));
+    const firstName = await resolveField({
+      value: args.firstName,
+      flag: "first-name",
+      message: t("labelFirstNamePrompt"),
       default: prefill.firstName,
-      validate: validateName("First name")
+      rule: validateName("First name"),
+      interactive
     });
-    const lastName = await input({
-      message: "Last name:",
+    const lastName = await resolveField({
+      value: args.lastName,
+      flag: "last-name",
+      message: t("labelLastNamePrompt"),
       default: prefill.lastName,
-      validate: validateName("Last name")
+      rule: validateName("Last name"),
+      interactive
     });
     await ctx.http.request({...V1_ROUTES.onboarding.updateProfile, body: {firstName, lastName}});
 
     // Phone is optional. When supplied, the contact update may require OTP — withOtp handles the
     // "send → prompt → verify" two-step (re-sends the same request with the code).
-    const phoneCountryCode = await input({
-      message: "Phone country code, e.g. 44 (optional):",
+    const phoneCountryCode = await resolveField({
+      value: args.phoneCountryCode,
+      flag: "phone-country-code",
+      message: t("labelPhoneCountryCodePrompt"),
       default: prefill.phoneCountryCode || DEFAULT_PHONE_COUNTRY_CODE,
-      validate: validateCountryCode
+      rule: validateCountryCode,
+      interactive,
+      optional: true
     });
-    const phoneNumber = await input({
-      message: "Phone number without country code (optional):",
+    const phoneNumber = await resolveField({
+      value: args.phoneNumber,
+      flag: "phone-number",
+      message: t("labelPhoneNumberPrompt"),
       default: prefill.phoneNumber,
-      validate: validatePhoneNumber
+      rule: validatePhoneNumber,
+      interactive,
+      optional: true
     });
+    // Setting the first number is NOT challenged: the backend only sends a code when REPLACING a
+    // number that already exists, and signup's account has none. withOtp stays as the guard for the
+    // profile-edit path. --otp is deliberately not passed — it is the email code, and the phone
+    // challenge (when it does fire) is a different code sent to the phone.
     if (phoneNumber) {
       const contactBody: Record<string, unknown> = {phoneNumber};
       if (phoneCountryCode) contactBody["phoneCountryCode"] = phoneCountryCode;
@@ -536,30 +652,50 @@ async function runOnboarding(ctx: CommandContext, args: SignupArgs): Promise<voi
         send: V1_ROUTES.onboarding.updateContact,
         verify: V1_ROUTES.onboarding.updateContact,
         body: contactBody,
-        onOtpSent: () => process.stderr.write("An OTP has been sent to your phone. Enter it below.\n")
+        interactive,
+        onOtpSent: () => process.stderr.write(t("otpSentToPhone"))
       });
-      process.stderr.write(otpUsed ? "✓ Phone verified.\n" : "✓ Phone saved.\n");
+      process.stderr.write(otpUsed ? t("phoneVerified") : t("phoneSaved"));
     }
 
     // Business address (part of businessInfo — resend the full accumulator).
     // Postcode first, then line 1, then line 2 — the order the address is usually looked up in.
     const addressPostalCode = (
-      await input({message: "Postal code:", transformer: (v) => v.toUpperCase(), validate: validatePostcode})
+      await resolveField({
+        value: args.postalCode,
+        flag: "postal-code",
+        message: t("labelPostalCodePrompt"),
+        rule: validatePostcode,
+        interactive
+      })
     ).toUpperCase();
-    const addressLine1 = await input({message: "Business address line 1:", validate: validateAddress});
+    const addressLine1 = await resolveField({
+      value: args.addressLine1,
+      flag: "address-line1",
+      message: t("labelBusinessAddressLine1"),
+      rule: validateAddress,
+      interactive
+    });
     const addressLine2 = (
-      await input({message: "Business address line 2 (optional):", validate: validateAddressLine2})
+      (await resolveField({
+        value: args.addressLine2,
+        flag: "address-line2",
+        message: t("labelBusinessAddressLine2Optional"),
+        rule: validateAddressLine2,
+        interactive,
+        optional: true
+      })) ?? ""
     ).trim();
     businessInfo.addressPostalCode = addressPostalCode;
     businessInfo.addressLine1 = addressLine1;
     if (addressLine2) businessInfo.addressLine2 = addressLine2;
     await ctx.http.request({...V1_ROUTES.onboarding.updateBusiness, body: {businessInfo}});
-    process.stderr.write("✓ Business contact details saved.\n");
+    process.stderr.write(t("businessContactSaved"));
   }
 
   // Step 4 ("how did you hear about us" / sourceOfInstall) was removed from the flow and
   // turnover moved up into step 1. The signupSources route record is now unused by this wizard.
-  process.stderr.write("\n✓ Onboarding complete.\n");
+  process.stderr.write(t("onboardingComplete"));
 
   const bizId = await getActiveBusinessId(ctx.profileName);
 

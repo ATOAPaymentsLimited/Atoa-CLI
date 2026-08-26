@@ -7,7 +7,7 @@ import {AtoaError} from "../../lib/errors";
 import {validateStaffName, isValidEmail, validateCountryCode, validatePhoneNumber} from "../../lib/validators";
 import {DEFAULT_PHONE_COUNTRY_CODE, STORES_PAGE_SIZE} from "../../lib/constants";
 import {t} from "../../lib/i18n";
-import {projectStaff, parseRepeatedFlag} from "./_shared";
+import {projectStaff, parseRepeatedFlag, type StaffRow} from "./_shared";
 import type {CommandContext} from "../../lib/context";
 
 type StaffAddArgs = CommonOptions & {
@@ -94,7 +94,7 @@ export default defineCommand({
       return;
     }
     const {data} = await ctx.http.request({...V1_ROUTES.staff.create, body});
-    ctx.print(projectStaff((data ?? {}) as never));
+    ctx.print(projectStaff((data ?? {}) as StaffRow));
   })
 });
 
@@ -127,27 +127,40 @@ async function promptForContact(
 ): Promise<{email?: string; phoneCountryCode?: string; phoneNumber?: string}> {
   const {input} = await import("@inquirer/prompts");
 
+  // Both are asked, and either satisfies the requirement — matching hasContact(), which is a
+  // minimum rather than a choice. Returning early on an email (as this used to) meant a staff
+  // member with both could only be created by re-running with flags.
   const email = (
     await input({
-      message: t("emailOrBlankForPhone", {label: t("labelEmailAddress")}),
+      message: t("labelEmailAddressOptional"),
       validate: (v) => !v.trim() || isValidEmail(v.trim()) || t("emailError")
     })
   ).trim();
-  if (email) return {email};
 
-  const phoneCountryCode =
-    existingCountryCode ||
+  const phoneNumber =
+    existingNumber ||
     (
       await input({
-        message: t("labelPhoneCountryCode"),
-        default: DEFAULT_PHONE_COUNTRY_CODE,
-        validate: validateCountryCode
+        message: t("labelPhoneNumberOptional"),
+        validate: (v) => !v.trim() || validatePhoneNumber(v)
       })
     ).trim();
-  const phoneNumber =
-    existingNumber || (await input({message: t("labelPhoneNumber"), validate: validatePhoneNumber})).trim();
 
-  return {phoneCountryCode, phoneNumber};
+  if (!email && !phoneNumber) throw new AtoaError(t("contactRequiredOne"), "validation");
+
+  // Only worth asking once there is a number to attach it to.
+  const phoneCountryCode = phoneNumber
+    ? existingCountryCode ||
+      (
+        await input({
+          message: t("labelPhoneCountryCode"),
+          default: DEFAULT_PHONE_COUNTRY_CODE,
+          validate: validateCountryCode
+        })
+      ).trim()
+    : undefined;
+
+  return {email: email || undefined, phoneCountryCode, phoneNumber: phoneNumber || undefined};
 }
 
 async function pickRoleId(ctx: CommandContext): Promise<string> {

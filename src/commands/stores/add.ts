@@ -5,6 +5,7 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {isInteractive} from "../../lib/output";
 import {resolveField} from "../../lib/prompt-field";
 import {STORE_FIELDS, normaliseStorePostcode} from "../../lib/validators";
+import {resolveStoreToUpdate} from "./_shared";
 import {t} from "../../lib/i18n";
 
 type StoresAddArgs = CommonOptions & {
@@ -28,6 +29,12 @@ export default defineCommand({
   }),
   run: runWithContext<StoresAddArgs>(async (ctx, args) => {
     const interactive = isInteractive(ctx.formatExplicit);
+
+    // Ahead of the wizard, so a merchant with no bank account isn't asked for an address first.
+    // A business still on its single DEFAULT location updates that one rather than gaining a second.
+    // Runs under --dryRun too: it only reads, and skipping it printed a create for what would
+    // have been an update — a preview that contradicts the run it is previewing.
+    const storeToUpdate = await resolveStoreToUpdate(ctx);
 
     // Optional fields are only asked for as part of the wizard. A caller who supplied every
     // required flag has said what they wanted, so don't stop them for address line 2.
@@ -85,6 +92,8 @@ export default defineCommand({
       cityOrTown: cityOrTown as string
     };
     if (addressLine2) fields.addressLine2 = addressLine2;
+    // An id on the upsert makes it an update — this renames the DEFAULT location in place.
+    if (storeToUpdate?.id) fields.id = storeToUpdate.id;
 
     if (ctx.dryRun) {
       ctx.print({...V1_ROUTES.stores.upsert, body: fields});
@@ -101,6 +110,8 @@ export default defineCommand({
     // centrally in lib/errors.ts, so every addon-gated command reports it identically.
     const {data} = await ctx.http.request({...V1_ROUTES.stores.upsert, rawBody: form});
     const store = (data ?? {}) as {id?: string; locationName?: string};
+    // Say so rather than reporting a create — the merchant still has one location, renamed.
+    if (storeToUpdate) process.stderr.write(t("defaultStoreRenamed"));
     ctx.print({id: store.id, locationName: store.locationName});
   })
 });

@@ -4,7 +4,14 @@ import {V1_ROUTES} from "../../lib/v1-routes";
 import {fetchAllPages} from "../../lib/list-view";
 import {isInteractive} from "../../lib/output";
 import {AtoaError} from "../../lib/errors";
-import {pickPermissionIds, resolvePermissionIds, withUpgradeHint, parseRepeatedFlag, projectRole} from "./_shared";
+import {
+  pickPermissionIds,
+  resolvePermissionIds,
+  withUpgradeHint,
+  parseRepeatedFlag,
+  projectRole,
+  type RoleRow as RoleWithPermissionNames
+} from "./_shared";
 import {resolveField} from "../../lib/prompt-field";
 import {validateRoleName} from "../../lib/validators";
 import {t} from "../../lib/i18n";
@@ -16,7 +23,7 @@ type RolesUpdateArgs = CommonOptions & {
   permission?: string | string[];
 };
 
-interface RoleRow {
+interface RoleWithPermissionIds {
   id?: string;
   name?: string;
   description?: string;
@@ -24,7 +31,7 @@ interface RoleRow {
   rolePermissions?: Array<{permission?: {id?: string}}>;
 }
 
-const permissionIdsOf = (role: RoleRow): string[] =>
+const permissionIdsOf = (role: RoleWithPermissionIds): string[] =>
   (role.rolePermissions ?? []).map((rp) => rp.permission?.id).filter((id): id is string => Boolean(id));
 
 const sameSet = (a: string[], b: string[]): boolean =>
@@ -53,7 +60,7 @@ export default defineCommand({
 
     // There is no CLI-accessible GET /:roleId, so prefill data comes from the list
     // rather than an extra per-role fetch.
-    const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)) as RoleRow[];
+    const rows = (await fetchAllPages(ctx, V1_ROUTES.roles.list)) as RoleWithPermissionIds[];
 
     if (!roleId) {
       if (!interactive) throw new AtoaError(t("argRequiredNonInteractive", {arg: "roleId"}), "validation");
@@ -103,7 +110,9 @@ export default defineCommand({
     }
 
     const body: Record<string, unknown> = {name};
-    if (description) body["description"] = description;
+    // Keyed on the change, not on truthiness: `if (description)` dropped the field when clearing
+    // it, so the backend kept the old text while the CLI reported the update as applied.
+    if (descriptionChanged) body["description"] = description || "";
     if (permissionsTouched) body["permissionIds"] = permissionIds;
 
     if (ctx.dryRun) {
@@ -113,14 +122,14 @@ export default defineCommand({
 
     try {
       const {data} = await ctx.http.request({...V1_ROUTES.roles.update, pathParams: {roleId}, body});
-      ctx.print(projectRole((data ?? {}) as never));
+      ctx.print(projectRole((data ?? {}) as RoleWithPermissionNames));
     } catch (err) {
       throw withUpgradeHint(err);
     }
   })
 });
 
-async function pickRoleId(rows: RoleRow[]): Promise<string> {
+async function pickRoleId(rows: RoleWithPermissionIds[]): Promise<string> {
   if (rows.length === 0) throw new AtoaError(t("noRolesFound"), "not_found");
   const {select} = await import("@inquirer/prompts");
   const roleId = await select<string>({
