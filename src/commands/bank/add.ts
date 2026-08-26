@@ -46,8 +46,8 @@ export default defineCommand({
     name: "add",
     description: t("cmdBankAdd")
   },
-  // Flags are optional: omitted fields are prompted for in a terminal. Pass them to script the
-  // command in a non-interactive shell (the OTP step still needs a TTY).
+  // Flags are optional: omitted fields are prompted for when stdout is a terminal and no --output
+  // was given. Pass them to script the command — including --otp, which skips the OTP prompt too.
   args: withCommonArgs({
     bankName: {type: "string", description: t("argBankName")},
     sortCode: {type: "string", description: t("argSortCodePrompted")},
@@ -79,6 +79,7 @@ export default defineCommand({
       send: V1_ROUTES.bank.add,
       body,
       otp: args.otp,
+      interactive: tty,
       onOtpSent: () => process.stderr.write(t("otpSentToContact")),
       resolveRetry: async (err) => {
         if (err.errorCode !== BackendErrorCode.COP_VERIFIED_WITH_FUZZY_MATCH) return null;

@@ -240,6 +240,28 @@ describe("bank add — --otp", () => {
     accountHolderName: "Cli Probe"
   };
 
+  /**
+   * The last place stdin alone decided whether to prompt. `withOtp` runs after the command has
+   * already worked out its own interactivity, so it takes that answer rather than re-deriving a
+   * weaker one: in a terminal with --output json, stdin is a TTY and the code request must still
+   * be reported as exit 9, not typed at a prompt nobody asked for.
+   */
+  it("exits 9 rather than prompting when --output json is passed in a terminal", async () => {
+    mock.requireOtp();
+    mock.formatExplicit = true;
+    (process.stdin as any).isTTY = true;
+    (process.stdout as any).isTTY = true;
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (bankAdd.run as any)({args: {...FIELDS, output: "json"}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(prompts.input).not.toHaveBeenCalled();
+    expect(out).toContain("--otp");
+    expect(process.exitCode).toBe(9);
+  });
+
   // The no-code probe request is what makes the backend SEND a code. Running it when the caller
   // already holds one invalidates that code (random in production) and spends a send against the
   // per-minute allowance — which is how this was caught: the throttle tripped on a live retry.

@@ -28,6 +28,11 @@ export interface WithOtpOptions {
   otp?: string;
   /** Max OTP entry attempts. Default 5 (matches the backend's OTP_MAX_WRONG_ATTEMPTS). */
   maxAttempts?: number;
+  /**
+   * Whether the caller may open a prompt — the command's own `isInteractive`, which also accounts
+   * for `--output`. Falls back to stdin when unset, since a prompt at least needs that much.
+   */
+  interactive?: boolean;
   /** OTP prompt (overridable for tests). Default: @inquirer input. */
   promptOtp?: (message: string) => Promise<string>;
   /** Called once when the backend reports an OTP was sent (before prompting). */
@@ -74,7 +79,12 @@ export async function withOtp(http: HttpClient, opts: WithOtpOptions): Promise<{
   // Default prompt needs a terminal; a supplied code or a test-supplied promptOtp does not.
   // The send has already happened by this point, so the message names --otp: re-running with it
   // is the way through, and the code the caller just received is the one to use.
-  if (!supplied && !opts.promptOtp && !process.stdin.isTTY) {
+  //
+  // The caller's own answer wins where it gave one: stdin alone says a code could be typed, not
+  // that anyone would see the request for it — `--output json` in a terminal satisfies stdin and
+  // still must exit 9 rather than prompt.
+  const canPrompt = opts.interactive ?? Boolean(process.stdin.isTTY);
+  if (!supplied && !opts.promptOtp && !canPrompt) {
     throw new AtoaError(t("otpRequiredPassFlag"), "otp_required");
   }
 
