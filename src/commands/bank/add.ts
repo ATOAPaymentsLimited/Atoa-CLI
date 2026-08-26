@@ -134,6 +134,11 @@ async function pickBank(
 ): Promise<{bankName: string; bankCode?: string}> {
   if (args.bankName?.trim()) return {bankName: args.bankName.trim()};
 
+  // Checked before the fetch: the institution list exists only to be picked from, so with nobody
+  // to pick it is a wasted round trip followed by the same failure. Named like every other missing
+  // flag rather than a bare "bank name is required".
+  if (!tty) throw new AtoaError(t("flagRequired", {flag: "bank-name"}), "validation");
+
   let banks: BankInstitution[] = [];
   try {
     const {data} = await ctx.http.request({...V1_ROUTES.institutions.list});
@@ -159,7 +164,8 @@ async function pickBank(
     };
   }
 
-  const typed = (tty ? await input({message: t("labelBankName")}) : "").trim();
+  // Reached only on a terminal (guarded above), so the empty case here is a blank answer.
+  const typed = (await input({message: t("labelBankName")})).trim();
   if (!typed) throw new AtoaError(t("bankNameRequired"), "validation");
   return {bankName: typed};
 }

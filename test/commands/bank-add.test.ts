@@ -462,3 +462,43 @@ describe("bank add — Confirmation of Payee near-match", () => {
     expect(process.exitCode).toBe(0);
   });
 });
+
+describe("bank add — a missing --bankName", () => {
+  const origStdin = process.stdin.isTTY;
+  const origStdout = process.stdout.isTTY;
+
+  beforeEach(() => {
+    mock.reset();
+    process.exitCode = 0;
+    vi.clearAllMocks();
+    (process.stdin as any).isTTY = false;
+    (process.stdout as any).isTTY = false;
+  });
+
+  afterEach(() => {
+    (process.stdin as any).isTTY = origStdin;
+    (process.stdout as any).isTTY = origStdout;
+  });
+
+  it("names the flag, like every other missing field", async () => {
+    let out = "";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => ((out += c), true));
+
+    await (bankAdd.run as any)({args: {sortCode: "040004", accountNumber: "12345678"}, rawArgs: []});
+    stderr.mockRestore();
+
+    expect(out).toContain("bank-name");
+    expect(process.exitCode).toBe(3);
+  });
+
+  it("fails without fetching the institution list first", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await (bankAdd.run as any)({args: {sortCode: "040004", accountNumber: "12345678"}, rawArgs: []});
+    stderr.mockRestore();
+
+    // The list only exists to be picked from, so with nobody to pick it is a round trip whose
+    // result is discarded before throwing anyway.
+    expect(mock.requests).toHaveLength(0);
+  });
+});
