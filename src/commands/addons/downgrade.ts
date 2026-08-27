@@ -9,9 +9,12 @@ import {
   fetchFeatureUsage,
   partitionByDirection,
   resolveTargetPlan,
-  downgradeBlockers
+  downgradeBlockers,
+  type AddonPlan,
+  type CurrentPlan
 } from "./_shared";
 import {t} from "../../lib/i18n";
+import type {CommandContext} from "../../lib/context";
 
 type DowngradeArgs = CommonOptions & {planId?: string};
 
@@ -54,7 +57,7 @@ export default defineCommand({
       throw new AtoaError(t("downgradeBlockedByUsage", {plan: target.name, blockers: detail}), "validation");
     }
 
-    let estimate: {estimatedCharges?: number; downgradeDate?: string} = {};
+    let estimate: DowngradeEstimate = {};
     try {
       const {data} = await ctx.http.request({...V1_ROUTES.addons.estimatedCharges});
       estimate = (data ?? {}) as typeof estimate;
@@ -62,28 +65,9 @@ export default defineCommand({
       estimate = {}; // advisory only — never block the downgrade on the estimate
     }
 
-    if (!ctx.yes) {
-      if (!isInteractive(ctx.formatExplicit)) {
-        throw new AtoaError(t("passYesToChangePlan"), "validation");
-      }
-      const when = estimate.downgradeDate ? t("downgradeTakesEffect", {date: estimate.downgradeDate}) : "";
-      const charges =
-        estimate.estimatedCharges != null ? t("downgradeEstimatedCharges", {amount: estimate.estimatedCharges}) : "";
-      const {confirm} = await import("@inquirer/prompts");
-      const ok = await confirm({
-        message: t("downgradeConfirm", {
-          from: current.addonPlan?.name ?? t("currentPlan"),
-          to: target.name,
-          amount: target.monthlyAmount ?? "",
-          when,
-          charges
-        }),
-        default: false
-      });
-      if (!ok) {
-        process.stdout.write(t("aborted"));
-        return;
-      }
+    if (!ctx.yes && !(await confirmDowngrade(ctx, current, target, estimate))) {
+      process.stdout.write(t("aborted"));
+      return;
     }
 
     try {
@@ -103,6 +87,37 @@ export default defineCommand({
     }
   })
 });
+
+type DowngradeEstimate = {estimatedCharges?: number; downgradeDate?: string};
+
+/**
+ * The last gate before the plan changes. Refuses outright with nobody to ask — a plan change is
+ * billing, so `--yes` has to be explicit rather than assumed from the absence of a terminal.
+ */
+async function confirmDowngrade(
+  ctx: CommandContext,
+  current: CurrentPlan,
+  target: AddonPlan,
+  estimate: DowngradeEstimate
+): Promise<boolean> {
+  if (!isInteractive(ctx.formatExplicit)) {
+    throw new AtoaError(t("passYesToChangePlan"), "validation");
+  }
+  const when = estimate.downgradeDate ? t("downgradeTakesEffect", {date: estimate.downgradeDate}) : "";
+  const charges =
+    estimate.estimatedCharges != null ? t("downgradeEstimatedCharges", {amount: estimate.estimatedCharges}) : "";
+  const {confirm} = await import("@inquirer/prompts");
+  return confirm({
+    message: t("downgradeConfirm", {
+      from: current.addonPlan?.name ?? t("currentPlan"),
+      to: target.name,
+      amount: target.monthlyAmount ?? "",
+      when,
+      charges
+    }),
+    default: false
+  });
+}
 
 /**
  * The backend's downgrade refusal is a 428 with a single generic message. If our own
