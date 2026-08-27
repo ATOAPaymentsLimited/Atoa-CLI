@@ -207,9 +207,9 @@ requires, and the CLI prints which extras it added.
 atoa bank list                          # list bank accounts for the active business
 atoa bank add                           # interactive: pick bank, enter details, verify via OTP
 atoa bank add --sortCode 040004 --accountNumber 12345678 \
-  --accountHolderName "Acme Ltd" --setPrimary
+  --accountHolderName "Acme Ltd"
 
-# Non-interactive. Adding a SECOND account needs a one-time code, so this is two runs:
+# Non-interactive. If a one-time code is required, the first run exits 9 having sent it:
 atoa bank add --bankName "Acme Bank" --sortCode 040004 \
   --accountNumber 12345678 --accountHolderName "Acme Ltd" --output json
 #   → exit 9: "An OTP was sent to your registered contact. Re-run with --otp <code>"
@@ -217,6 +217,10 @@ atoa bank add ...same flags... --otp 123456 --output json    # → exit 0
 atoa bank get <bankAccountId>           # get a bank account by id
 atoa bank delete <bankAccountId> --yes  # remove a bank account
 ```
+
+A business's first bank account becomes its primary automatically. `--setPrimary` switches which
+account Atoa settles to and re-points every location already linked to one, so pass it only when
+you mean to change the billing account.
 
 ### Payment links (`payment-links`)
 
