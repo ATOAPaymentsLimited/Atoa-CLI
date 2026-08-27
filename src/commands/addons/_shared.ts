@@ -136,6 +136,30 @@ export function partitionByDirection(
   };
 }
 
+export interface UsageRow extends FeatureUsage {
+  included: boolean;
+  limit: number | null;
+  overlimitCharges: number;
+}
+
+/**
+ * Usage joined to the plan's caps. `included` matters: a feature absent from the plan is not the
+ * same as one with no cap, and collapsing both to limit=null renders "unlimited" for a feature you
+ * can't use.
+ */
+export function toUsageRows(usage: FeatureUsage[], plan?: AddonPlan): UsageRow[] {
+  const limits = plan ? planFeatureMap(plan) : new Map();
+  return usage.map((u) => {
+    const feature = limits.get(u.featureType);
+    return {
+      ...u,
+      included: Boolean(feature),
+      limit: feature?.limit ?? null,
+      overlimitCharges: feature?.overlimitCharges ?? 0
+    };
+  });
+}
+
 /** Usage against the plan's cap — a bare `1` doesn't say whether the plan allows one or five. */
 export function formatFeatureUsage(used: number, feature?: {limit: number | null; overlimitCharges: number}): string {
   if (!feature) return t("usageNotIncluded", {used});

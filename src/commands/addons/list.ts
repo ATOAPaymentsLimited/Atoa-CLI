@@ -10,8 +10,10 @@ import {
   partitionByDirection,
   formatPlanChoice,
   formatFeatureUsage,
-  planFeatureMap,
-  type AddonPlan
+  toUsageRows,
+  type AddonPlan,
+  type CurrentPlan,
+  type UsageRow
 } from "./_shared";
 
 const planList = (plans: AddonPlan[]): string =>
@@ -40,18 +42,7 @@ export default defineCommand({
 
     const currentOrder = current.addonPlan?.planOrder ?? -1;
     const {upgrades, downgrades} = partitionByDirection(available.availablePlans ?? [], currentOrder);
-    const limits = current.addonPlan ? planFeatureMap(current.addonPlan) : new Map();
-    // `included` matters: a feature absent from the plan is not the same as one with no cap,
-    // and collapsing both to limit=null would render "unlimited" for a feature you can't use.
-    const usageRows = usage.map((u) => {
-      const feature = limits.get(u.featureType);
-      return {
-        ...u,
-        included: Boolean(feature),
-        limit: feature?.limit ?? null,
-        overlimitCharges: feature?.overlimitCharges ?? 0
-      };
-    });
+    const usageRows = toUsageRows(usage, current.addonPlan);
 
     const out = {
       currentPlan: current.addonPlan
@@ -74,31 +65,41 @@ export default defineCommand({
       return;
     }
 
-    const monthly = current.addonPlan?.monthlyAmount;
-    const rows: Array<[string, string | undefined]> = [
-      [t("labelPlan"), current.addonPlan?.name],
-      [t("labelPrice"), monthly != null ? t("planPriceMonthly", {amount: monthly}) : undefined],
-      [t("labelRenewal"), current.renewalType],
-      [t("labelStarted"), current.startDate],
-      [t("labelEnds"), current.endDate]
-    ];
-    process.stdout.write(renderKeyValues(t("titleAddonPlan"), rows) + "\n\n");
-
-    if (usage.length) {
-      process.stdout.write(
-        renderKeyValues(
-          t("titleFeatureUsage"),
-          usageRows.map(
-            (u) => [u.featureType, formatFeatureUsage(u.usage, u.included ? u : undefined)] as [string, string]
-          )
-        ) + "\n\n"
-      );
-    }
-    if (upgrades.length) {
-      process.stdout.write(t("headingUpgradeTo") + planList(upgrades) + "\n");
-    }
-    if (downgrades.length) {
-      process.stdout.write(t("headingDowngradeTo") + planList(downgrades));
-    }
+    printPlanSummary(current, usageRows, upgrades, downgrades);
   })
 });
+
+/** The human view: the current plan, then usage, then where you can move to. */
+function printPlanSummary(
+  current: CurrentPlan,
+  usageRows: UsageRow[],
+  upgrades: AddonPlan[],
+  downgrades: AddonPlan[]
+): void {
+  const monthly = current.addonPlan?.monthlyAmount;
+  const rows: Array<[string, string | undefined]> = [
+    [t("labelPlan"), current.addonPlan?.name],
+    [t("labelPrice"), monthly != null ? t("planPriceMonthly", {amount: monthly}) : undefined],
+    [t("labelRenewal"), current.renewalType],
+    [t("labelStarted"), current.startDate],
+    [t("labelEnds"), current.endDate]
+  ];
+  process.stdout.write(renderKeyValues(t("titleAddonPlan"), rows) + "\n\n");
+
+  if (usageRows.length) {
+    process.stdout.write(
+      renderKeyValues(
+        t("titleFeatureUsage"),
+        usageRows.map(
+          (u) => [u.featureType, formatFeatureUsage(u.usage, u.included ? u : undefined)] as [string, string]
+        )
+      ) + "\n\n"
+    );
+  }
+  if (upgrades.length) {
+    process.stdout.write(t("headingUpgradeTo") + planList(upgrades) + "\n");
+  }
+  if (downgrades.length) {
+    process.stdout.write(t("headingDowngradeTo") + planList(downgrades));
+  }
+}

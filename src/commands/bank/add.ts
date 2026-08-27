@@ -222,8 +222,7 @@ async function collectAccountFields(
       : "") ||
     undefined;
 
-  const setAsPrimary =
-    args.setPrimary ?? (tty ? await confirm({message: t("setAsPrimaryAccount"), default: false}) : false);
+  const setAsPrimary = args.setPrimary ?? (await isFirstBankAccount(ctx));
 
   // Currency is always GBP and nickname isn't prompted; both stay overridable via flags for scripting.
   const currency = (args.currency || "GBP").toUpperCase();
@@ -239,6 +238,20 @@ async function collectAccountFields(
     ...(nickName ? {nickName} : {}),
     ...(setAsPrimary ? {setAsPrimary: true} : {})
   };
+}
+
+/**
+ * A business's first account becomes its primary — nothing else can be, and asking would let an
+ * Enter-press leave the business with an account but no primary. Later ones are just added.
+ *
+ * Runs under --dryRun because it decides a body field: skipping it would preview a request without
+ * the setAsPrimary the real run sends. Deliberately uncaught — it precedes the write, so a failure
+ * costs only a retry, whereas guessing would set a settlement flag on no evidence.
+ */
+async function isFirstBankAccount(ctx: CommandContext): Promise<boolean> {
+  const {data} = await ctx.http.request({...V1_ROUTES.bank.list});
+  const rows = Array.isArray(data) ? data : ((data as {data?: unknown})?.data ?? []);
+  return (rows as unknown[]).length === 0;
 }
 
 /**

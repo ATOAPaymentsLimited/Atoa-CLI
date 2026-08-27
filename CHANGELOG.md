@@ -15,7 +15,7 @@ Accurate failure reporting, and `signup` / `bank add` runnable without a termina
   `--accept-terms`, `--marketing`, `--start-new`, and one for each onboarding field. It runs as two
   invocations — the first sends the one-time code, the second carries it plus every value.
   Interactive use is unchanged.
-- **`--otp` on `bank add`**, for the code required when adding a second account.
+- **`--otp` on `bank add`**, for the one-time code the endpoint can require.
 - **Exit code `9`** — a one-time code was sent and nothing was written. Distinct from success
   (`signup` previously reported `0`, claiming an account existed when none did) and from invalid
   input (`bank add` previously reported `3`, sending callers hunting for a bad flag).
@@ -40,6 +40,10 @@ Accurate failure reporting, and `signup` / `bank add` runnable without a termina
 - **`bank add` names the missing flag.** A non-interactive run without `--bank-name`, `--sort-code`
   or `--account-number` now reports which one is missing, instead of one blanket message listing
   all three — and fails before contacting the API rather than after.
+- **`bank add` no longer asks about the primary account.** A business's first account becomes its
+  primary automatically, matching the dashboard; previously the prompt defaulted to no, so pressing
+  Enter — or any non-interactive run — left the business with an account but no primary at all.
+  Later accounts are added without being asked. `--setPrimary` is unchanged when passed explicitly.
 
 ### Fixed
 
