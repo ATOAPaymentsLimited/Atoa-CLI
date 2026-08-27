@@ -36,62 +36,7 @@ export default defineCommand({
     // have been an update — a preview that contradicts the run it is previewing.
     const storeToUpdate = await resolveStoreToUpdate(ctx);
 
-    // Optional fields are only asked for as part of the wizard. A caller who supplied every
-    // required flag has said what they wanted, so don't stop them for address line 2.
-    const allRequiredGiven = Boolean(
-      args.locationName?.trim() &&
-        args.addressLine1?.trim() &&
-        args.cityOrTown?.trim() &&
-        args.addressPostalCode?.trim()
-    );
-
-    // Each field is validated against its rule, whether it
-    // arrived by flag or by prompt; an invalid flag is re-asked rather than aborting the run.
-    const locationName = await resolveField({
-      value: args.locationName,
-      flag: "location-name",
-      message: t("labelLocationName"),
-      rule: STORE_FIELDS.locationName,
-      interactive
-    });
-    const addressLine1 = await resolveField({
-      value: args.addressLine1,
-      flag: "address-line1",
-      message: t("labelAddressLine1"),
-      rule: STORE_FIELDS.addressLine1,
-      interactive
-    });
-    const addressLine2 = await resolveField({
-      value: args.addressLine2,
-      flag: "address-line2",
-      message: t("labelAddressLine2Optional"),
-      rule: STORE_FIELDS.addressLine2,
-      interactive: interactive && !allRequiredGiven,
-      optional: true
-    });
-    const cityOrTown = await resolveField({
-      value: args.cityOrTown,
-      flag: "city-or-town",
-      message: t("labelTownCity"),
-      rule: STORE_FIELDS.cityOrTown,
-      interactive
-    });
-    const addressPostalCode = await resolveField({
-      value: args.addressPostalCode,
-      flag: "address-postal-code",
-      message: t("labelPostCode"),
-      rule: STORE_FIELDS.addressPostalCode,
-      interactive
-    });
-
-    const fields: Record<string, string> = {
-      locationName: locationName as string,
-      addressLine1: addressLine1 as string,
-      // Stripped: a stored postcode never contains a space.
-      addressPostalCode: normaliseStorePostcode(addressPostalCode as string),
-      cityOrTown: cityOrTown as string
-    };
-    if (addressLine2) fields.addressLine2 = addressLine2;
+    const fields = await collectStoreFields(args, interactive);
     // An id on the upsert makes it an update — this renames the DEFAULT location in place.
     if (storeToUpdate?.id) fields.id = storeToUpdate.id;
 
@@ -115,3 +60,61 @@ export default defineCommand({
     ctx.print({id: store.id, locationName: store.locationName});
   })
 });
+
+/** Resolves each field from its flag or an interactive prompt, returns the upsert body. */
+async function collectStoreFields(args: StoresAddArgs, interactive: boolean): Promise<Record<string, string>> {
+  // Optional fields are only asked for as part of the wizard. A caller who supplied every
+  // required flag has said what they wanted, so don't stop them for address line 2.
+  const allRequiredGiven = Boolean(
+    args.locationName?.trim() && args.addressLine1?.trim() && args.cityOrTown?.trim() && args.addressPostalCode?.trim()
+  );
+
+  // Each field is validated against its rule, whether it
+  // arrived by flag or by prompt; an invalid flag is re-asked rather than aborting the run.
+  const locationName = await resolveField({
+    value: args.locationName,
+    flag: "location-name",
+    message: t("labelLocationName"),
+    rule: STORE_FIELDS.locationName,
+    interactive
+  });
+  const addressLine1 = await resolveField({
+    value: args.addressLine1,
+    flag: "address-line1",
+    message: t("labelAddressLine1"),
+    rule: STORE_FIELDS.addressLine1,
+    interactive
+  });
+  const addressLine2 = await resolveField({
+    value: args.addressLine2,
+    flag: "address-line2",
+    message: t("labelAddressLine2Optional"),
+    rule: STORE_FIELDS.addressLine2,
+    interactive: interactive && !allRequiredGiven,
+    optional: true
+  });
+  const cityOrTown = await resolveField({
+    value: args.cityOrTown,
+    flag: "city-or-town",
+    message: t("labelTownCity"),
+    rule: STORE_FIELDS.cityOrTown,
+    interactive
+  });
+  const addressPostalCode = await resolveField({
+    value: args.addressPostalCode,
+    flag: "address-postal-code",
+    message: t("labelPostCode"),
+    rule: STORE_FIELDS.addressPostalCode,
+    interactive
+  });
+
+  const fields: Record<string, string> = {
+    locationName: locationName as string,
+    addressLine1: addressLine1 as string,
+    // Stripped: a stored postcode never contains a space.
+    addressPostalCode: normaliseStorePostcode(addressPostalCode as string),
+    cityOrTown: cityOrTown as string
+  };
+  if (addressLine2) fields.addressLine2 = addressLine2;
+  return fields;
+}
