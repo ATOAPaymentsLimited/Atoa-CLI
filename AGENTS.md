@@ -200,7 +200,7 @@ skipped on that path; the bank-account requirement still applies.
 ### Bank accounts
 | Action | Command | Ask the user for |
 |---|---|---|
-| create | `bank add` | **bank name**, **sort code**, **account number**; also ask for the account holder name (see below); optionally nickname, currency, primary |
+| create | `bank add` | **bank name**, **sort code**, **account number**; also ask for the account holder name (see below); optionally nickname and currency |
 | delete | `bank delete <ID> --yes` | which account |
 
 Flags: `--bankName --sortCode --accountNumber --accountHolderName --nickName --currency --setPrimary
@@ -211,7 +211,13 @@ tolerates **spaces only** — `1234-5678` is rejected.
 
 `--accountHolderName` is technically optional, but **ask for it and pass it**: it is what the
 Confirmation-of-Payee check runs against, and omitting it gives up that check. It is not
-length-limited here. `--nickName`, `--currency` and `--setPrimary` are optional.
+length-limited here. `--nickName` and `--currency` are optional.
+
+**Don't ask about the primary account, and don't pass `--setPrimary`.** A business's first account
+becomes its primary automatically, so there is nothing to ask. On a later account the flag switches
+which account Atoa settles to **and re-points every location already linked to one** — the dashboard
+puts a confirmation in front of that, the CLI does not. Only pass it if the user asks to change the
+billing account, and tell them what it replaces first.
 
 **A near-match on the name exits with code 3.** Confirmation of Payee compares what you send against what
 the bank holds, and a close-but-not-equal name ("Acme Trading Ltd" vs "ACME TRADING LIMITED") is

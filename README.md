@@ -221,6 +221,10 @@ atoa bank get <bankAccountId>           # get a bank account by id
 atoa bank delete <bankAccountId> --yes  # remove a bank account
 ```
 
+A business's first bank account becomes its primary automatically. `--setPrimary` switches which
+account Atoa settles to and re-points every location already linked to one, so pass it only when
+you mean to change the billing account.
+
 ### Payment links (`payment-links`)
 
 `--amount` is in GBP (e.g. `10.50`), not pence. `--store-id` is required.

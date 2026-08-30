@@ -83,7 +83,6 @@
   "bankNameRequired": "Bank name is required",
   "reEnterAccountNumber": "Re-enter account number to confirm:",
   "labelAccountHolderName": "Account holder name (the name as it appears on the bank account):",
-  "setAsPrimaryAccount": "Set as your primary (default) account?",
   "topicRequired": "topic is required",
   "commsChannelFlagRequired": "provide at least one of --email, --sms, --push (on|off)",
   "noTopicFound": "no topic found matching \"{topic}\"",
