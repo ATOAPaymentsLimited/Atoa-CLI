@@ -193,27 +193,30 @@ atoa staff add … --store <storeId>      # restrict to one or more stores (repe
 atoa staff update <userId>              # edit name, email, phone, role or permitted stores
 atoa staff delete <userId> --yes        # remove a staff member from the business
 atoa roles list                         # list available roles for this business
+atoa roles permissions                  # permission catalogue: id, name, category, requires
 atoa roles add --name "Shift lead"      # create a role; prompts for permissions
+atoa roles add --name "Shift lead" --permission <id>   # repeat --permission for several
 atoa roles update <roleId>              # edit name, description or permissions
 atoa roles delete <roleId> --yes        # delete a role
 ```
 
-Permissions can depend on other permissions. Selecting one automatically grants what it
-requires, and the CLI prints which extras it added.
+`--permission` takes permission **ids**, which `atoa roles permissions` lists — every other view
+shows only names. Permissions can depend on other permissions: selecting one automatically grants
+what it requires, and the CLI prints which extras it added.
 
 ### Bank accounts (`bank`)
 
 ```bash
 atoa bank list                          # list bank accounts for the active business
 atoa bank add                           # interactive: pick bank, enter details, verify via OTP
-atoa bank add --sortCode 040004 --accountNumber 12345678 \
-  --accountHolderName "Acme Ltd"
+atoa bank add --sortCode 123456 --accountNumber 12345678 \
+  --accountHolderName "<account holder name>"
 
-# Non-interactive. If a one-time code is required, the first run exits 9 having sent it:
-atoa bank add --bankName "Acme Bank" --sortCode 040004 \
-  --accountNumber 12345678 --accountHolderName "Acme Ltd" --output json
-#   → exit 9: "An OTP was sent to your registered contact. Re-run with --otp <code>"
-atoa bank add ...same flags... --otp 123456 --output json    # → exit 0
+# Non-interactive. If a one-time code is required, the first run exits with code 9 having sent it:
+atoa bank add --bankName "<bank name>" --sortCode 123456 \
+  --accountNumber 12345678 --accountHolderName "<account holder name>" --output json
+#   → exit code 9: "An OTP was sent to your registered contact. Re-run with --otp <code>"
+atoa bank add <same flags> --otp <code> --output json        # → exit code 0
 atoa bank get <bankAccountId>           # get a bank account by id
 atoa bank delete <bankAccountId> --yes  # remove a bank account
 ```
@@ -309,7 +312,7 @@ goes to your inbox, so it takes two runs:
 
 ```bash
 atoa signup --email you@example.com --output json
-#   → exit 9: "An OTP has been sent to you@example.com."
+#   → exit code 9: "An OTP has been sent to you@example.com."
 
 atoa signup --email you@example.com --otp 123456 --accept-terms \
   --business-name "Acme Ltd" --industry "Retail - Other" \
@@ -324,7 +327,7 @@ and [Terms of Service](https://paywithatoa.co.uk/terms/); `--marketing` is a sep
 
 `--business-structure` is `Limited Company` or `Charity`. `--industry` and `--monthly-turnover` are
 server-defined lists that vary by environment, so the values above are illustrative — pass the
-option's name and, if it doesn't match, the CLI exits `3` listing every valid one to choose from.
+option's name and, if it doesn't match, the CLI exits with code `3` listing every valid one to choose from.
 
 ---
 
@@ -580,7 +583,7 @@ The CLI uses POSIX-style exit codes so shell pipelines and CI systems can branch
 | `2` | Auth / forbidden | HTTP 401 or 403 — token invalid / revoked / lacks permission |
 | `3` | Validation error | HTTP 400, or client-side input rejected (bad amount, bad JSON, bad enum) |
 | `4` | Not found | HTTP 404 — resource doesn't exist on this env |
-| `5` | Rate limited | HTTP 429 — back off and retry |
+| `5` | Rate limited | HTTP 429, or a one-time-code / sign-in throttle — **stop and wait**; retrying extends the block |
 | `6` | Network / TLS / DNS | Couldn't reach the server (connection refused, DNS, cert expired, timeout) |
 | `7` | Business not selected | The account belongs to several businesses and none is active — run `atoa business use <id>` |
 | `8` | Plan limit | The add-on plan doesn't allow this — `atoa addons list` shows the limits |
@@ -593,7 +596,7 @@ if ! atoa refunds create --paymentRequestId "$PR" --amount 5.00 --idempotencyKey
   case $? in
     2) echo "Token invalid — re-login required" ;;
     3) echo "Bad input — fix the payload" ;;
-    5) echo "Rate limited — retry with backoff" ;;
+    5) echo "Throttled — wait it out; retrying extends the block" ;;
     6) echo "Network blip — retry the same idempotency key is safe" ;;
     *) echo "Unhandled error" ;;
   esac

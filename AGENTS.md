@@ -40,14 +40,15 @@ Flags accept either spelling: `--locationName` or `--location-name`.
 5. Run with `--dryRun --output json`, show the resolved request, wait for agreement.
 6. Run for real with `--output json --yes`.
 
-If it exits 3, name the flag that was wrong and ask for a corrected value — do not guess and re-run.
+If it exits with code 3, name the flag that was wrong and ask for a corrected value — do not guess
+and re-run.
 
 ## Ids, not names — the mistake that looks like a server fault
 
 **Anything that identifies a record takes its id.** Passing the name a human would use sends that
 text straight to the API as though it were an id, and the reply is a generic *"Unable to process
-your request at the moment"* with exit **1** — which reads as an outage, not as your flag. This is
-the single most likely way to waste a run.
+your request at the moment"* with exit code **1** — which reads as an outage, not as your flag.
+This is the single most likely way to waste a run.
 
 `atoa staff add --role "Supervisor"` fails. `--role 4f3c…` succeeds.
 
@@ -89,7 +90,7 @@ valid options when they don't. Everything else is id-only.
 | 8 | plan limit | report; `atoa addons list` shows limits |
 | 9 | a one-time code was sent | ask the user for the code, re-run the **same command** plus `--otp <code>` |
 
-Exit 9 is not a failure and not a success: nothing was wrong with your flags, and nothing was
+Exit code 9 is not a failure and not a success: nothing was wrong with your flags, and nothing was
 written. It means the CLI sent a code and is waiting for it. `atoa bank add` and `atoa signup` both
 report this state the same way.
 
@@ -97,9 +98,10 @@ report this state the same way.
 
 - **Browser login** (`atoa login`) — `whoami`, `business`, `profile`, `keys`, `sessions`, `stores`,
   `bank`, `kyb`, `staff`, `roles`, `addons`, `comms`, `custom-branding`, `custom-sms`,
-  `direct-debit`, `payment-links`, `google`, `signup`. Exit 2 → ask the user to run `atoa login`.
+  `direct-debit`, `payment-links`, `google`, `signup`.
+  Exit code 2 → ask the user to run `atoa login`.
 - **SDK key** — `payments`, `customers`, `payment-methods`, `card-on-file`, `refunds`, `payouts`,
-  `webhooks`, `bank-feed`, `institutions`, and raw `get`/`post`/`delete`. Exit 2 → check
+  `webhooks`, `bank-feed`, `institutions`, and raw `get`/`post`/`delete`. Exit code 2 → check
   `atoa keys list --output json`, or mint one with `atoa keys create` (see **API keys** below for
   the name rule and `--env`).
 
@@ -166,7 +168,7 @@ silently redirects a merchant who hasn't submitted KYB to `/home`, so the link l
 while your command exited 0. Run `atoa kyb status --output json` first and only pass the card link
 on once KYB has been submitted and not rejected.
 
-Both commands need an active business. Without one they exit **3** (not 7, despite the table) —
+Both commands need an active business. Without one they exit with code **3** (not 7, despite the table) —
 fix it with `atoa business use <id>`; you do not need `atoa login` unless the profile has no
 session at all.
 
@@ -217,7 +219,7 @@ which account Atoa settles to **and re-points every location already linked to o
 puts a confirmation in front of that, the CLI does not. Only pass it if the user asks to change the
 billing account, and tell them what it replaces first.
 
-**A near-match on the name exits 3.** Confirmation of Payee compares what you send against what
+**A near-match on the name exits with code 3.** Confirmation of Payee compares what you send against what
 the bank holds, and a close-but-not-equal name ("Acme Trading Ltd" vs "ACME TRADING LIMITED") is
 refused rather than guessed at. The message names the bank's version.
 
@@ -241,14 +243,14 @@ trader's or charity's in the owner's own — but **no read command exposes the c
 this is a question for the user, not something to infer. Show both and let them pick.
 
 **Adding an account may require a one-time code.** Whether it does depends on the business, so don't
-try to predict it — always run without `--otp` first. If a code is needed the command exits **9**
+try to predict it — always run without `--otp` first. If a code is needed the command exits with code **9**
 with *"An OTP was sent to your registered contact. Re-run with --otp &lt;code&gt;"*; ask the user for the
 code, then re-run the **same command** plus `--otp <code>`. Exit 9 is expected, not a fault. One
 attempt per code — a wrong one is not retried; go back to the user for a fresh one.
 
 **Never loop on this.** Requesting codes repeatedly, or submitting wrong ones repeatedly, trips a
 throttle: roughly one send per minute, and too many wrong codes blocks the account for an **hour**
-that a new code cannot clear. If you see exit 5, stop entirely and read the message out — some say
+that a new code cannot clear. If you see exit code 5, stop entirely and read the message out — some say
 to wait, others say to request a new code, and only the user can decide to do that. Never
 re-request on your own. Two failed attempts is the point to hand back, not to try again.
 
@@ -261,24 +263,24 @@ re-request on your own. Two failed attempts is the point to hand back, not to tr
 | list linked | `google locations` | — |
 
 Always **search first and show the user the results**, then link with a `placeId` taken from that
-list. `--place-id` on its own exits 3: the listing's name and address are stored exactly as the CLI
+list. `--place-id` on its own exits with code 3: the listing's name and address are stored exactly as the CLI
 sends them and are never looked up from the id, so the search is what supplies them. Pass the same
-`--search` text both times — the id must appear in those results or the command exits 3.
+`--search` text both times — the id must appear in those results or the command exits with code 3.
 
 One listing can be linked to **one store, anywhere on the platform**. Linking one that is already
-taken — including re-linking a store to the listing it already has — exits **1** with *"Google
+taken — including re-linking a store to the listing it already has — exits with code **1** with *"Google
 Location already linked to Atoa"*. That is not a flag problem and re-running will not fix it.
 
 Linking a store that already has a listing **replaces** it, so confirm the exact listing with the
 user and `--dryRun` first. A wrong link is recoverable: `google unlink --store <ID> --yes` removes
 it, and the listing is then free to link again. `--store` takes the **Atoa store id**, the same one
-you linked with — `google unlink` without it lists the linked stores and exits 3, and a store with
-no link exits 4 rather than pretending to remove something.
+you linked with — `google unlink` without it lists the linked stores and exits with code 3, and a store with
+no link exits with code 4 rather than pretending to remove something.
 
 `google search` works on any account. `link`, `unlink` and `locations` need the Google Review
-add-on, and that is checked **before** the request reaches the endpoint — without it they exit **8**
+add-on, and that is checked **before** the request reaches the endpoint — without it they exit with code **8**
 whatever the flags say, and `atoa addons list` shows the limits. Once the plan allows it,
-`locations` still exits **4** until the merchant connects their Google Business account, which
+`locations` still exits with code **4** until the merchant connects their Google Business account, which
 happens in the dashboard, not the CLI. Report either and stop; neither is fixable by re-running.
 
 ### Staff
@@ -345,7 +347,7 @@ individual. One mandate per business; it cannot be set up twice, so check
 `atoa direct-debit status --output json` before offering to create one.
 
 **`--accept-mandate` is required** and records the merchant's agreement to the Direct Debit mandate
-terms. Without it the command exits 3 and creates nothing. Only pass it once the user has
+terms. Without it the command exits with code 3 and creates nothing. Only pass it once the user has
 explicitly agreed, and tell them what they are agreeing to — the request stores an affirmative
 acceptance with a timestamp, so passing it on their behalf asserts something on the record.
 
@@ -393,7 +395,7 @@ amount and the customer.
 ```
 atoa refunds create --paymentRequestId <id> --amount <n>
 atoa refunds cancel <ID> --yes
-atoa webhooks create --url <url> --event <event>     # exits 3 listing valid events if wrong
+atoa webhooks create --url <url> --event <event>     # exits with code 3 listing valid events if wrong
 atoa webhooks delete <ID> --yes
 ```
 
@@ -425,7 +427,7 @@ resend. Work in this order:
 4. **Only then** run the first invocation, which sends the code:
    ```
    atoa signup --email <email> --output json
-   # → "An OTP has been sent to <email>."   exit 9
+   # → "An OTP has been sent to <email>."   exit code 9
    ```
 5. Ask them for the code and immediately run the second invocation with everything:
    ```
@@ -445,7 +447,7 @@ same command **without `--otp`** — it resumes from where it stopped.
   a separate opt-in, off unless asked for.
 - `--business-structure` is **Limited Company** or **Charity** — offer those two as a choice.
 - `--industry` and `--monthly-turnover` come from the API, so you cannot know the valid values in
-  advance. Ask in plain language, then expect to refine: if the value doesn't match, the CLI exits 3
+  advance. Ask in plain language, then expect to refine: if the value doesn't match, the CLI exits with code 3
   and **lists every valid option**. Show that list, ask which one they meant, and re-run **without
   `--otp`** (the account already exists by then). Tell the user to expect this rather than treating
   it as an error. Never guess — "Retail" is ambiguous when nine options begin with it.
