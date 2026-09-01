@@ -1,0 +1,28 @@
+import {defineCommand} from "citty";
+import {t} from "../../lib/i18n";
+import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
+import {V1_ROUTES} from "../../lib/v1-routes";
+import {isInteractive} from "../../lib/output";
+import {formatTopic, projectTopic, type TopicRow} from "./_shared";
+
+export default defineCommand({
+  meta: {name: "list", description: t("cmdCommsList")},
+  args: withCommonArgs({}),
+  run: runWithContext<CommonOptions>(async (ctx) => {
+    if (ctx.dryRun) {
+      ctx.print({...V1_ROUTES.communicationPreferences.list});
+      return;
+    }
+    const {data} = await ctx.http.request({...V1_ROUTES.communicationPreferences.list});
+    const topics = (data as {topics?: TopicRow[]} | null)?.topics ?? [];
+
+    if (!isInteractive(ctx.formatExplicit)) {
+      ctx.print(topics.map(projectTopic));
+      return;
+    }
+
+    for (const topic of topics) {
+      process.stdout.write(formatTopic(topic) + "\n");
+    }
+  })
+});

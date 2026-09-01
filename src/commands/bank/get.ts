@@ -2,6 +2,7 @@ import {defineCommand} from "citty";
 import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {AtoaError} from "../../lib/errors";
+import {projectBankAccount, type BankAccountRow} from "./_shared";
 
 type BankGetArgs = CommonOptions & {id: string};
 
@@ -19,6 +20,6 @@ export default defineCommand({
       return;
     }
     const {data} = await ctx.http.request({...V1_ROUTES.bank.get, pathParams: {id}});
-    ctx.print(data);
+    ctx.print(projectBankAccount(data as BankAccountRow));
   })
 });

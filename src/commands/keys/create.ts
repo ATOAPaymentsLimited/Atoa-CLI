@@ -4,6 +4,8 @@ import {withCommonArgs, runWithContext, type CommonOptions} from "../_common";
 import {AtoaError} from "../../lib/errors";
 import {V1_ROUTES} from "../../lib/v1-routes";
 import {saveSdkKey} from "../../lib/sdk-key-file";
+import {isInteractive} from "../../lib/output";
+import {t} from "../../lib/i18n";
 
 interface CreateKeyResponse {
   apiSecret?: string;
@@ -22,13 +24,17 @@ export default defineCommand({
   }),
   run: runWithContext<CreateArgs>(async (ctx, args) => {
     const env = ctx.env;
-    const tty = Boolean(process.stdin.isTTY);
+    // stdout, not stdin — a prompt drawn into a redirected stdout is invisible to the person
+    // meant to answer it.
+    const tty = isInteractive(ctx.formatExplicit);
 
     // The backend requires an "API Access name" — a human label for the key.
     const name = (
       args.name ?? (tty ? await input({message: 'Key name (a label to recognise this key, e.g. "CI server"):'}) : "")
     ).trim();
-    if (!name) throw new AtoaError("an API key name is required — pass --name or run in a terminal", "validation");
+    // Named like every other missing flag: "run in a terminal" stopped being the fix once this
+    // stopped prompting under --output, where the caller is in a terminal and still gets here.
+    if (!name) throw new AtoaError(t("flagRequired", {flag: "name"}), "validation");
 
     if (ctx.dryRun) {
       ctx.print({...V1_ROUTES.apiKeys.create, pathParams: {env}, body: {name}});

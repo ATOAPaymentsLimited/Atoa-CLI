@@ -37,6 +37,100 @@ describe("withOtp", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("re-prompts on a 401 wrong code (bank surface), not just a 400", async () => {
+    // The bank flow rejects a mistyped code with 401. Treating only 400 as retryable gave one
+    // attempt instead of five, and reported a typo as an auth failure advising `atoa login`.
+    const {http} = fakeHttp([
+      {throw: otpRequired(401)},
+      {throw: new AtoaError("Incorrect code used.", "auth", {status: 401})},
+      {data: {id: "ba_2"}}
+    ]);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const prompt = vi.fn(async () => "123456");
+
+    const res = await withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, promptOtp: prompt});
+
+    stderr.mockRestore();
+    expect(res).toEqual({data: {id: "ba_2"}, otpUsed: true});
+    expect(prompt).toHaveBeenCalledTimes(2); // retried rather than giving up after one go
+  });
+
+  it("does not spend OTP attempts on a dead access token", async () => {
+    // A 401 carrying INVALID_CREDENTIAL is an expired/invalid token, not a mistyped code. Retrying
+    // burns attempts on something no retype can fix.
+    const {http} = fakeHttp([
+      {throw: otpRequired(401)},
+      {
+        throw: new AtoaError("Session expired — run `atoa login`", "auth", {
+          status: 401,
+          errorCode: "INVALID_CREDENTIAL"
+        })
+      }
+    ]);
+    const prompt = vi.fn(async () => "123456");
+
+    await expect(
+      withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, promptOtp: prompt})
+    ).rejects.toMatchObject({errorCode: "INVALID_CREDENTIAL"});
+
+    expect(prompt).toHaveBeenCalledTimes(1); // not re-prompted
+  });
+
+  // A supplied code gets exactly one attempt. There is nobody to retype it, so looping would just
+  // spend the backend's wrong-attempt budget on the same wrong value; re-running is the retry.
+  it("does not retry a wrong code supplied via --otp", async () => {
+    const wrong = {
+      throw: new AtoaError("Incorrect code used. 3 attempts remaining", "auth", {
+        status: 401,
+        errorCode: "BANK_INCORRECT_OTP"
+      })
+    };
+    const {http, calls} = fakeHttp([wrong, wrong, wrong]);
+    const prompt = vi.fn(async () => "999999");
+
+    await expect(
+      withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, otp: "340820", promptOtp: prompt})
+    ).rejects.toMatchObject({kind: "validation"});
+
+    expect(prompt).not.toHaveBeenCalled(); // never asks — there is no one to ask
+    expect(calls).toHaveLength(1); // one submit, no probe and no retry
+  });
+
+  it("stops on an expired code instead of re-prompting four more times", async () => {
+    // Expiry is raised only for a code that matched, so retyping it re-fails identically. The
+    // outcome was always correct; this is about not asking five times to say the same thing.
+    const expired = {
+      throw: new AtoaError("Code expired. Request a new one.", "auth", {
+        status: 401,
+        errorCode: "BANK_OTP_CODE_EXPIRED"
+      })
+    };
+    const {http} = fakeHttp([{throw: otpRequired(401)}, expired, expired, expired, expired, expired]);
+    const prompt = vi.fn(async () => "123456");
+
+    await expect(
+      withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, promptOtp: prompt})
+    ).rejects.toMatchObject({kind: "validation"});
+
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops immediately when the OTP throttle trips, even though it arrives as a 401", async () => {
+    const {http, calls} = fakeHttp([
+      {throw: otpRequired(401)},
+      {throw: new AtoaError("You have reached the maximum number of OTP requests", "rate_limit", {status: 401})}
+    ]);
+    const prompt = vi.fn(async () => "123456");
+
+    await expect(
+      withOtp(http, {send: SEND, verify: VERIFY, body: {bankName: "X"}, promptOtp: prompt})
+    ).rejects.toMatchObject({kind: "rate_limit"});
+
+    // No further attempts: each one would spend another request against the same allowance.
+    expect(calls).toHaveLength(2);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
   it("prompts and verifies when OTP is required — 400 variant (onboarding)", async () => {
     const {http, calls} = fakeHttp([{throw: otpRequired(400)}, {data: {ok: true}}]);
     const prompt = vi.fn(async () => "123456");

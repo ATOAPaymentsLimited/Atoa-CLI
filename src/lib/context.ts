@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function */
 import {parseEnvFlag, resolveBaseUrl, type Env} from "./env";
 import {buildAuthHeader, fingerprintToken} from "./auth";
 import {latestSdkSecret} from "./sdk-key-file";
@@ -7,11 +8,16 @@ import {
   isProfileIncomplete,
   reconcileConfig,
   resolveActiveProfile,
+  readProfile,
+  writeProfile,
   type ProfileConfig
 } from "./config-store";
+import {normalizeBusinesses, type BusinessSummary} from "./businesses";
+import {V1_ROUTES} from "./v1-routes";
 import {buildHttpClient, assertTlsHardenedEnv, type HttpClient} from "./http";
 import {resolveFormat, print, type OutputFormat} from "./output";
 import {AtoaError} from "./errors";
+import {t} from "./i18n";
 
 export type {Env, OutputFormat, HttpClient};
 
@@ -51,25 +57,10 @@ export async function buildContext(
 
   const resolved = await resolveActiveProfile(opts.profile);
   if (resolved.kind === "none") {
-    throw new AtoaError("No profile is configured. Run `atoa login` to pair this device.", "auth");
+    throw new AtoaError(t("noProfileConfigured"), "auth");
   }
   if (resolved.kind === "ambiguous") {
-    throw new AtoaError(
-      `Multiple profiles are configured (${resolved.names.join(", ")}). ` +
-        "Run `atoa profile use <name>` to set the active profile, or override per-command with `--profile <name>` or `ATOA_PROFILE=<name>`.",
-      "validation"
-    );
-  }
-
-  // Refuse to run commands against a profile that's missing required local
-  // fields (today: businessId). A corrupted / hand-edited entry should fail
-  // loudly with an actionable message, not crash deep in code.
-  if (!flags.allowIncomplete && isProfileIncomplete(resolved.profile)) {
-    throw new AtoaError(
-      `profile "${resolved.name}" is incomplete (missing businessId). ` +
-        `Re-pair via \`atoa login --profile ${resolved.name}\` or remove it with \`atoa logout --profile ${resolved.name}\`.`,
-      "validation"
-    );
+    throw new AtoaError(t("profilesAmbiguous", {names: resolved.names.join(", ")}), "validation");
   }
 
   const env = parseEnvFlag(opts.env ?? resolved.profile.defaultEnv);
@@ -86,7 +77,14 @@ export async function buildContext(
   // never stored by the CLI — they live in ~/atoa/auth/secret_key.json for the user/agent.
   const jwt = await store.getJwtTokens(resolved.name);
   if (!jwt) {
-    throw new AtoaError(`No credentials for ${resolved.name}. Run: atoa login --profile ${resolved.name}`, "auth");
+    // No session AND no business means `signup` wrote the profile and never got further — a
+    // stub, not a usable profile. Saying so beats "run login", which re-pairs a profile the
+    // user probably never meant to keep.
+    const stub = isProfileIncomplete(resolved.profile);
+    throw new AtoaError(
+      stub ? t("profileNeverFinished", {name: resolved.name}) : t("noCredentialsForProfile", {name: resolved.name}),
+      "auth"
+    );
   }
   const authHeader = "unused";
   const authFingerprint = "";
@@ -108,6 +106,16 @@ export async function buildContext(
     }
   });
 
+  // A profile with no businessId is recoverable, not fatal: `signup` writes the profile as soon
+  // as the account exists but only fills the business in once one has been created, so an
+  // interrupted onboarding leaves this gap. The JWT session is still valid, so the business can
+  // simply be looked up and written back — telling the user to log out and in again would
+  // discard a working session to fix a field the server already knows.
+  let profile = resolved.profile;
+  if (!flags.allowIncomplete && isProfileIncomplete(profile)) {
+    profile = await adoptBusiness(http, resolved.name);
+  }
+
   return {
     env,
     http,
@@ -118,9 +126,47 @@ export async function buildContext(
     yes,
     authFingerprint,
     profileName: resolved.name,
-    profile: resolved.profile,
+    profile,
     print: (data) => print(data, format)
   };
+}
+
+/**
+ * Fills in a profile's missing businessId from the account's own businesses, and persists it so
+ * the lookup happens once rather than on every command.
+ *
+ * Only an unambiguous account is adopted silently. With several businesses the CLI cannot know
+ * which one was meant, and with none there is nothing to adopt — both say so instead of guessing.
+ */
+async function adoptBusiness(http: HttpClient, profileName: string): Promise<ProfileConfig> {
+  let businesses: BusinessSummary[];
+  try {
+    const {data} = await http.request({...V1_ROUTES.businesses.list});
+    businesses = normalizeBusinesses(data);
+  } catch {
+    throw new AtoaError(t("businessListUnreachable", {name: profileName}), "network");
+  }
+
+  if (businesses.length === 0) {
+    throw new AtoaError(t("profileHasNoBusiness", {name: profileName}), "validation");
+  }
+  if (businesses.length > 1) {
+    const names = businesses
+      .map((b) => t("businessListItem", {id: b.id, name: b.legalBusinessName || t("unnamed")}))
+      .join("\n");
+    throw new AtoaError(
+      t("profileBusinessAmbiguous", {name: profileName, count: businesses.length, businesses: names}),
+      "business_selection"
+    );
+  }
+
+  const {id, legalBusinessName} = businesses[0];
+  await writeProfile(profileName, {businessId: id, activeBusinessId: id});
+  process.stderr.write(t("profileResumed", {name: profileName, business: legalBusinessName || id}));
+
+  const updated = await readProfile(profileName);
+  if (!updated) throw new AtoaError(t("profileDisappeared", {name: profileName}), "generic");
+  return updated;
 }
 
 /**
@@ -134,10 +180,7 @@ export async function ensureSdkKey(env: Env): Promise<string> {
   const existing = await latestSdkSecret(env);
   if (existing) return existing;
 
-  throw new AtoaError(
-    `No Atoa API key stored for ${env}. Mint a revocable one with \`atoa keys create --env ${env}\`, then retry.`,
-    "auth"
-  );
+  throw new AtoaError(t("noSdkKeyStored", {env}), "auth");
 }
 
 /**
