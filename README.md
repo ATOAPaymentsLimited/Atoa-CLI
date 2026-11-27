@@ -30,8 +30,10 @@ irm https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/ins
 ```
 
 Binaries ship for Windows x64, macOS (Apple silicon and Intel) and Linux x64/arm64, including
-Alpine. They are code-signed (Authenticode on Windows, Developer ID and notarized on macOS), and
-every release carries a GPG-signed `SHA256SUMS` and GitHub build provenance
+Alpine, as a 25–36 MB download (`atoa-<os>-<arch>.tar.gz`, or `atoa-windows-x64.zip`) that
+unpacks to a single `atoa` / `atoa.exe`. They are code-signed (Authenticode on Windows, Developer
+ID and notarized on macOS), and every release carries a GPG-signed `SHA256SUMS` and GitHub build
+provenance for both the download and the binary inside it
 (`gh attestation verify <file> -R ATOAPaymentsLimited/Atoa-CLI`). Import the release key
 (`atoa-release-signing-key.asc`, attached to every release, fingerprint
 `CD41 B3FD 0E27 808C AF7D 7BDF 5C3C BA69 5F1B E613`) with `gpg --import` and `install.sh` then

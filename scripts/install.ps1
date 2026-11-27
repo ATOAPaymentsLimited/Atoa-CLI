@@ -3,7 +3,7 @@
 #
 #   irm https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.ps1 | iex
 #
-# Downloads the standalone atoa.exe for your CPU from the GitHub Release, verifies
+# Downloads atoa.exe for your CPU (zipped) from the GitHub Release, verifies
 # its checksum and Authenticode signature, and installs it onto your PATH.
 # No Node.js required. Re-run it to upgrade. Non-interactive: safe for CI and AI
 # agents (`powershell -c "irm ... | iex"` exits 1 on any failure).
@@ -34,7 +34,7 @@
     'ARM64' { $arch = 'x64' }
     default { throw "atoa install: unsupported architecture: $cpu. Try: npm install -g @atoapayments/atoa-cli" }
   }
-  $asset = "atoa-windows-$arch.exe"
+  $asset = "atoa-windows-$arch.zip"
   $sums = 'SHA256SUMS'
 
   # --- resolve download base ------------------------------------------------
@@ -75,10 +75,16 @@
     }
     Write-Host 'Checksum OK.'
 
+    # --- unpack (only after the archive has been verified) ------------------
+    $unpacked = Join-Path $tmp 'unpacked'
+    Expand-Archive -Path (Join-Path $tmp $asset) -DestinationPath $unpacked
+    $downloaded = Join-Path $unpacked 'atoa.exe'
+    if (-not (Test-Path -LiteralPath $downloaded)) { throw "atoa install: atoa.exe not found in $asset" }
+
     # --- verify Authenticode signature --------------------------------------
     # Valid alone would accept any publisher's certificate, so the signer must be
     # Atoa. Match the organization, not a thumbprint: the certificates rotate often.
-    $sig = Get-AuthenticodeSignature (Join-Path $tmp $asset)
+    $sig = Get-AuthenticodeSignature $downloaded
     if ($sig.Status -ne 'Valid') {
       throw "atoa install: Authenticode signature not valid (status: $($sig.Status)). Aborting."
     }
@@ -96,7 +102,7 @@
     $old = "$exe.old-$([Guid]::NewGuid())"
     if (Test-Path $exe) { Move-Item -Force $exe $old }
     try {
-      Move-Item -Force (Join-Path $tmp $asset) $exe
+      Move-Item -Force $downloaded $exe
     } catch {
       if (Test-Path $old) { Move-Item -Force $old $exe }
       throw "atoa install: could not install $exe ($($_.Exception.Message)); the previous version was kept."

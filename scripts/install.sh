@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.sh | sh
 #
-# Downloads the standalone `atoa` binary for your OS/CPU from the GitHub Release,
+# Downloads the standalone `atoa` binary (.tar.gz) for your OS/CPU from the GitHub Release,
 # verifies its checksum (and GPG signature, if our public key is imported), and
 # installs it onto your PATH. No Node.js required. Re-run it to upgrade.
 # Non-interactive: safe for CI and AI agents. Exits non-zero on any failure.
@@ -43,8 +43,10 @@ if [ "$os_name" = "darwin" ] && [ "$arch" = "x64" ] && [ "$(sysctl -n sysctl.pro
   arch="arm64"
 fi
 
-asset="atoa-${os_name}-${arch}"
+asset="atoa-${os_name}-${arch}.tar.gz"
 sums="SHA256SUMS"
+
+command -v tar >/dev/null 2>&1 || err "need tar to unpack the download."
 
 # --- download tool ----------------------------------------------------------
 if command -v curl >/dev/null 2>&1; then
@@ -103,6 +105,9 @@ else
   echo "atoa install: GPG signature not checked (import atoa-release-signing-key.asc to authenticate; checksum verified)." >&2
 fi
 
+# --- unpack (only after the archive has been verified) ----------------------
+tar -xzf "${tmp}/${asset}" -C "$tmp" atoa 2>/dev/null || err "could not unpack atoa from ${asset}."
+
 # --- install ----------------------------------------------------------------
 if [ -n "${ATOA_INSTALL_DIR:-}" ]; then
   dest="$ATOA_INSTALL_DIR"
@@ -114,7 +119,7 @@ fi
 
 mkdir -p "$dest"
 dest="$(cd "$dest" && pwd)" # absolute, so the PATH entry works from any directory
-install -m 0755 "${tmp}/${asset}" "${dest}/atoa"
+install -m 0755 "${tmp}/atoa" "${dest}/atoa"
 echo "Installed atoa -> ${dest}/atoa"
 
 # curl-downloaded binaries usually aren't quarantined, but strip the attribute
