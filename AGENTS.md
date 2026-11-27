@@ -3,6 +3,25 @@
 This is a real merchant account moving real money. Never guess an id, an amount or a flag. When
 unsure, run `atoa <command> --help` — it is authoritative, this file is a summary.
 
+## If `atoa` is not installed
+
+Install it with one non-interactive command. Your current shell won't see the new PATH entry yet,
+so run the absolute path the installer prints on its `Installed atoa -> …` line (or open a new
+shell), and check it with `--version`:
+
+```
+curl -fsSL https://cli.atoa.me/latest/install.sh | sh
+```
+
+```
+powershell -c "irm https://cli.atoa.me/latest/install.ps1 | iex"
+```
+
+To install a specific version, use its folder instead of `latest`, e.g.
+`https://cli.atoa.me/v0.4.0/install.sh`.
+
+If Node.js 20+ is available you can skip installing: `npx -y @atoapayments/atoa-cli@latest <command>`.
+
 ## The one rule that makes everything work
 
 **Pass `--output json` on every command, and `--yes` on anything that writes.** Both are needed and

@@ -1,0 +1,425 @@
+# Standalone `atoa` binaries (no Node.js needed) for Windows, macOS and Linux.
+#
+# Branch pushes (develop, release/**, hotfix/**) build, sign and smoke-test every
+# binary and upload it compressed (atoa-<os>-<arch>.tar.gz, Windows .zip) as a
+# 30-day workflow artifact (UAT builds).
+#
+# A `v*.*.*` tag also runs the `release` job: it attaches the archives, the two
+# installers (stamped with the tag), a GPG-signed SHA256SUMS and the GPG public key
+# to a DRAFT GitHub Release, records build provenance, and only then publishes it.
+# The `publish-downloads` job then serves that release from cli.atoa.me (S3 +
+# CloudFront), which is where scripts/install.sh and scripts/install.ps1 download from:
+#   https://cli.atoa.me/v1.2.3/<file>   write-once, every release (rc included)
+#   https://cli.atoa.me/latest/<file>   the latest stable release, plus latest/VERSION
+#   v1.2.3        -> published; marked latest if it is the highest stable version
+#   v1.2.3-rc.1   -> published as a prerelease; never "latest", customers unaffected
+#
+# To release, push the tag; don't create the release in the GitHub UI (a UI
+# release is public before its binaries exist). An annotated tag's message
+# becomes the release notes; a lightweight tag gets GitHub's generated notes.
+#   git tag -a v1.2.3 -F notes.md <sha> && git push origin v1.2.3
+#
+# A failed release: use "Re-run failed jobs" on its run. A release that is
+# already published with assets is never modified.
+
+name: Binaries
+
+on:
+  push:
+    branches:
+      - develop
+      - 'release/**'
+      - 'hotfix/**'
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PKG_VERSION: 6.26.1
+  CLI_DOWNLOADS_URL: https://cli.atoa.me
+
+jobs:
+  build:
+    name: build (${{ matrix.asset }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # asset = the compressed release file; bin = the binary inside it.
+          - { runner: windows-latest, target: node24-win-x64, asset: atoa-windows-x64.zip, bin: atoa.exe }
+          - { runner: macos-latest, target: node24-macos-arm64, asset: atoa-darwin-arm64.tar.gz, bin: atoa }
+          - { runner: macos-15-intel, target: node24-macos-x64, asset: atoa-darwin-x64.tar.gz, bin: atoa }
+          # linuxstatic: one binary that runs on glibc (Ubuntu, Debian) and musl (Alpine).
+          - { runner: ubuntu-latest, target: node24-linuxstatic-x64, asset: atoa-linux-x64.tar.gz, bin: atoa }
+          - { runner: ubuntu-24.04-arm, target: node24-linuxstatic-arm64, asset: atoa-linux-arm64.tar.gz, bin: atoa }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # The binary reports package.json's version, so a release tag must match it.
+      - name: Check release tag
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          base="${GITHUB_REF_NAME%%-*}"
+          suffix="${GITHUB_REF_NAME#"$base"}"
+          if [ "$base" != "v$version" ] || [[ -n "$suffix" && ! "$suffix" =~ ^-rc\.[0-9]+$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version (expected v$version or v$version-rc.N)"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Package binary
+        run: npx --yes "@yao-pkg/pkg@$PKG_VERSION" . --targets ${{ matrix.target }} --output "dist/bin/${{ matrix.bin }}"
+
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p "$APPLE_CERT_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$APPLE_CERT_PASSWORD" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_CERT_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      # The entitlements are required: the bundled Node/V8 JIT needs executable
+      # memory, which the hardened runtime (needed for notarization) blocks.
+      - name: Codesign binary
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: |
+          codesign --force --timestamp --options runtime \
+            --entitlements .github/macos-entitlements.plist \
+            --sign "$APPLE_SIGN_IDENTITY" "dist/bin/${{ matrix.bin }}"
+          codesign --verify --strict --verbose=2 "dist/bin/${{ matrix.bin }}"
+
+      # A bare Mach-O binary can't be stapled (only .app/.dmg/.pkg can), so
+      # Gatekeeper checks the notarization ticket online.
+      - name: Notarize binary
+        if: runner.os == 'macOS'
+        timeout-minutes: 30
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/api_key.p8"
+          ditto -c -k --keepParent "dist/bin/${{ matrix.bin }}" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/api_key.p8" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" \
+            --wait --output-format json | tee "$RUNNER_TEMP/notarize.json"
+          [ "$(jq -r .status "$RUNNER_TEMP/notarize.json")" = "Accepted" ]
+
+      - name: Remove signing keychain and key
+        if: always() && runner.os == 'macOS'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/api_key.p8"
+
+      - uses: actions/setup-dotnet@v4
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Sign Windows binary
+        if: runner.os == 'Windows'
+        uses: azure/artifact-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: AtoaCLI
+          certificate-profile-name: atoa-cert-profile
+          files-folder: dist/bin/
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # install.ps1 refuses a binary whose Authenticode signature isn't Valid.
+      - name: Check Windows signature
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature 'dist/bin/${{ matrix.bin }}'
+          Write-Output "Status: $($sig.Status); Signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "Authenticode signature is $($sig.Status)" }
+
+      # Ships the signed binary compressed (about 64% smaller download). The
+      # signature lives inside the binary (Authenticode / Mach-O code signature),
+      # so archiving doesn't touch it. COPYFILE_DISABLE stops macOS tar adding
+      # AppleDouble "._atoa" files.
+      - name: Archive binary
+        run: |
+          mkdir -p dist/release
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -NoProfile -Command "Compress-Archive -Path 'dist/bin/${{ matrix.bin }}' -DestinationPath 'dist/release/${{ matrix.asset }}'"
+          else
+            COPYFILE_DISABLE=1 tar -czf "dist/release/${{ matrix.asset }}" -C dist/bin "${{ matrix.bin }}"
+          fi
+
+      # Unpacks the archive and runs that copy on its own OS/CPU, so a packaging,
+      # archiving or hardened-runtime problem fails here, not on a customer's machine.
+      - name: Smoke test the archived binary
+        run: |
+          mkdir -p dist/extracted
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -NoProfile -Command "Expand-Archive -Path 'dist/release/${{ matrix.asset }}' -DestinationPath 'dist/extracted'"
+          else
+            tar -xzf "dist/release/${{ matrix.asset }}" -C dist/extracted
+          fi
+          bin="dist/extracted/${{ matrix.bin }}"
+          cmp "$bin" "dist/bin/${{ matrix.bin }}"
+          expected="$(node -p "require('./package.json').version")"
+          actual="$("$bin" --version)"
+          [ "$actual" = "$expected" ] || { echo "::error::$bin --version printed '$actual', expected '$expected'"; exit 1; }
+          "$bin" --help > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/release/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment: UAT # GPG_PRIVATE_KEY / GPG_KEY_ID live in this environment
+    permissions:
+      contents: write # create and publish the GitHub Release
+      id-token: write # build provenance
+      attestations: write # build provenance
+    outputs:
+      latest: ${{ steps.publish.outputs.latest }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A release that is already published with assets is never modified:
+      # re-signing changes the binaries' hashes and would break pinned checksums.
+      # (A release created in the UI is published with no assets; that one is filled in.)
+      - name: Check existing release
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            draft="$(gh release view "$TAG" --json isDraft -q .isDraft)"
+            assets="$(gh release view "$TAG" --json assets -q '.assets | length')"
+            if [ "$draft" = "false" ] && [ "$assets" != "0" ]; then
+              echo "::error::Release $TAG is already published with assets; refusing to modify it. Cut a new version instead."
+              exit 1
+            fi
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      # The attached installers carry this release's tag as their default version,
+      # so cli.atoa.me/<tag>/install.sh installs <tag> and cli.atoa.me/latest/install.sh
+      # (the latest release's copy) installs the latest.
+      - name: Add installers, public key and checksums
+        run: |
+          sed "s/^RELEASE_TAG=\"latest\"\$/RELEASE_TAG=\"$TAG\"/" scripts/install.sh > out/install.sh
+          sed "s/^  \$ReleaseTag = 'latest'\$/  \$ReleaseTag = '$TAG'/" scripts/install.ps1 > out/install.ps1
+          grep -qx "RELEASE_TAG=\"$TAG\"" out/install.sh \
+            || { echo "::error::could not stamp $TAG into install.sh"; exit 1; }
+          grep -qx "  \$ReleaseTag = '$TAG'" out/install.ps1 \
+            || { echo "::error::could not stamp $TAG into install.ps1"; exit 1; }
+          cp scripts/atoa-release-signing-key.asc out/
+          cd out && sha256sum -- * > SHA256SUMS
+
+      # Signs, then verifies against ONLY the committed public key, so a GPG_KEY_ID
+      # that drifts from the key users import (or from the fingerprint install.sh
+      # pins) fails here, not on their machines.
+      - name: Sign checksums
+        working-directory: out
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --yes --local-user "$GPG_KEY_ID" --output SHA256SUMS.asc --detach-sign --armor SHA256SUMS
+          key_info="$(gpg --show-keys --with-colons atoa-release-signing-key.asc)"
+          fpr="$(awk -F: '/^fpr/ {print $10; exit}' <<< "$key_info")"
+          grep -q "ATOA_KEY_FPR=\"$fpr\"" install.sh \
+            || { echo "::error::install.sh does not pin the fingerprint of scripts/atoa-release-signing-key.asc ($fpr)"; exit 1; }
+          verify_home="$(mktemp -d)"
+          gpg --homedir "$verify_home" --batch --import atoa-release-signing-key.asc
+          status="$(gpg --homedir "$verify_home" --batch --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null || true)"
+          grep -q "^\[GNUPG:\] VALIDSIG .*$fpr" <<< "$status" \
+            || { echo "::error::SHA256SUMS.asc does not verify against scripts/atoa-release-signing-key.asc"; exit 1; }
+
+      # Attest the archives AND the binaries inside them, so `gh attestation verify`
+      # also works on an installed atoa / atoa.exe, not only on the download.
+      - name: Unpack binaries for attestation
+        run: |
+          for archive in out/*.tar.gz out/*.zip; do
+            dir="unpacked/$(basename "$archive")"
+            mkdir -p "$dir"
+            case "$archive" in
+              *.zip) unzip -q "$archive" -d "$dir" ;;
+              *) tar -xzf "$archive" -C "$dir" ;;
+            esac
+          done
+
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            out/*
+            unpacked/*/*
+
+      # The default checkout can leave an annotated tag lightweight locally, so
+      # fetch the real tag object (needed to tell them apart and for --notes-from-tag).
+      - name: Attach assets to draft release
+        run: |
+          git fetch --force --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          elif [ "$(git cat-file -t "refs/tags/$TAG")" = "tag" ]; then
+            gh release create "$TAG" out/* --draft --verify-tag --title "$TAG" --notes-from-tag
+          else
+            gh release create "$TAG" out/* --draft --verify-tag --title "$TAG" --generate-notes
+          fi
+
+      # "latest" only moves forward: a hotfix on an older line stays out of the way.
+      - name: Publish release
+        id: publish
+        run: |
+          case "$TAG" in
+            *-rc.*)
+              gh release edit "$TAG" --draft=false --prerelease
+              echo "latest=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          published="$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName -q '.[].tagName')"
+          highest="$(printf '%s\n%s\n' "$published" "$TAG" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          if [ "$highest" = "$TAG" ]; then
+            gh release edit "$TAG" --draft=false --latest
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            gh release edit "$TAG" --draft=false --latest=false
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Serves the release from https://cli.atoa.me/<tag>/ (write-once) and, when it is
+  # the latest stable version, https://cli.atoa.me/latest/. The files are pulled back
+  # from the published GitHub Release and checked against SHA256SUMS and their build
+  # attestations before upload, so the bucket only ever receives verified bytes.
+  # Runs once the bucket, role and distribution are configured as repository
+  # variables (CLI_DOWNLOADS_*); until then tag runs skip it.
+  publish-downloads:
+    needs: release
+    if: github.ref_type == 'tag' && vars.CLI_DOWNLOADS_BUCKET != ''
+    runs-on: ubuntu-latest
+    environment: release-signing # the AWS role only trusts this environment
+    permissions:
+      contents: read
+      id-token: write # assume the AWS role through OIDC
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      IS_LATEST: ${{ needs.release.outputs.latest }}
+      BUCKET: ${{ vars.CLI_DOWNLOADS_BUCKET }}
+      DISTRIBUTION_ID: ${{ vars.CLI_DOWNLOADS_DISTRIBUTION_ID }}
+    steps:
+      - name: Download and verify the published release
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D out
+          cd out
+          sha256sum -c SHA256SUMS
+          for f in *; do
+            gh attestation verify "$f" -R "$GITHUB_REPOSITORY" > /dev/null \
+              || { echo "::error::$f failed build-provenance verification"; exit 1; }
+          done
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.CLI_DOWNLOADS_ROLE_ARN }}
+          aws-region: ${{ vars.CLI_DOWNLOADS_REGION }}
+
+      # <tag>/ is write-once: S3 refuses to overwrite an existing key, and a re-run
+      # that finds identical bytes already there moves on. latest/ is replaced
+      # file by file, installers next and VERSION last, then its cache is cleared.
+      - name: Upload to cli.atoa.me
+        working-directory: out
+        run: |
+          content_type() {
+            case "$1" in
+              *.tar.gz) echo "application/gzip" ;;
+              *.zip) echo "application/zip" ;;
+              *) echo "text/plain; charset=utf-8" ;;
+            esac
+          }
+          upload() { # <key> <file> <cache-control> [write-once]
+            sum="$(openssl dgst -sha256 -binary "$2" | base64)"
+            set -- "$1" "$2" "$3" "${4:-}" "$sum"
+            if [ -n "$4" ]; then
+              if aws s3api put-object --bucket "$BUCKET" --key "$1" --body "$2" --if-none-match '*' \
+                --checksum-algorithm SHA256 --checksum-sha256 "$5" --content-type "$(content_type "$1")" \
+                --cache-control "$3" > /dev/null 2> "$RUNNER_TEMP/put.err"; then
+                return 0
+              fi
+              grep -q PreconditionFailed "$RUNNER_TEMP/put.err" || { cat "$RUNNER_TEMP/put.err"; return 1; }
+              existing="$(aws s3api head-object --bucket "$BUCKET" --key "$1" --checksum-mode ENABLED --query ChecksumSHA256 --output text)"
+              [ "$existing" = "$5" ] || { echo "::error::$1 already exists with different content"; return 1; }
+              return 0
+            fi
+            aws s3api put-object --bucket "$BUCKET" --key "$1" --body "$2" \
+              --checksum-algorithm SHA256 --checksum-sha256 "$5" --content-type "$(content_type "$1")" \
+              --cache-control "$3" > /dev/null
+          }
+          for f in *; do
+            upload "$TAG/$f" "$f" "public, max-age=31536000, immutable" write-once
+          done
+          if [ "$IS_LATEST" = "true" ]; then
+            for f in *; do
+              case "$f" in install.sh | install.ps1) continue ;; esac
+              upload "latest/$f" "$f" "public, max-age=300"
+            done
+            upload latest/install.sh install.sh "public, max-age=300"
+            upload latest/install.ps1 install.ps1 "public, max-age=300"
+            printf '%s\n' "$TAG" > "$RUNNER_TEMP/VERSION"
+            upload latest/VERSION "$RUNNER_TEMP/VERSION" "public, max-age=300"
+            invalidation="$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/latest/*' --query Invalidation.Id --output text)"
+            aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION_ID" --id "$invalidation"
+          fi
+
+      - name: Check cli.atoa.me serves this release
+        run: |
+          curl -fsS "$CLI_DOWNLOADS_URL/$TAG/SHA256SUMS" | cmp - out/SHA256SUMS
+          if [ "$IS_LATEST" = "true" ]; then
+            served="$(curl -fsS "$CLI_DOWNLOADS_URL/latest/VERSION" | tr -d '[:space:]')"
+            [ "$served" = "$TAG" ] || { echo "::error::$CLI_DOWNLOADS_URL/latest/VERSION says '$served', expected $TAG"; exit 1; }
+          fi
