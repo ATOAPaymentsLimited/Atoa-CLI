@@ -1,28 +1,61 @@
 #!/bin/sh
 # Atoa CLI installer for Linux and macOS.
 #
-#   curl -fsSL https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.sh | sh
+#   Latest:            curl -fsSL https://cli.atoa.me/latest/install.sh | sh
+#   A given version:   curl -fsSL https://cli.atoa.me/v0.4.0/install.sh | sh
+#               or:    curl -fsSL https://cli.atoa.me/latest/install.sh | sh -s -- --version 0.4.0
 #
-# Downloads the standalone `atoa` binary (.tar.gz) for your OS/CPU from the GitHub Release,
-# verifies its checksum (and GPG signature, if our public key is imported), and
-# installs it onto your PATH. No Node.js required. Re-run it to upgrade.
+# Downloads the standalone `atoa` binary (.tar.gz) for your OS/CPU, verifies its
+# checksum (and GPG signature, if our public key is imported), and installs it onto
+# your PATH. No Node.js required. Re-run it to upgrade.
 # Non-interactive: safe for CI and AI agents. Exits non-zero on any failure.
 #
+# Version, first match wins: --version <version>, then ATOA_VERSION, then the release
+# this installer was downloaded from.
+#
 # Environment overrides:
-#   ATOA_VERSION         version to install (e.g. 0.4.0 or v0.4.0). Default: latest.
+#   ATOA_VERSION         version to install (e.g. 0.4.0 or v0.4.0).
 #   ATOA_INSTALL_DIR     target directory. Default: /usr/local/bin (root or writable)
 #                        or ~/.local/bin otherwise.
 #   ATOA_NO_MODIFY_PATH  set to 1 to never edit shell startup files.
-#   ATOA_DOWNLOAD_URL    download from this base URL instead of GitHub (a mirror).
+#   ATOA_DOWNLOAD_URL    download from a mirror with the same layout as cli.atoa.me
+#                        (<url>/latest/VERSION, <url>/v<version>/<file>). GitHub works
+#                        for a given version:
+#                        https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/download
 set -eu
 
-REPO="ATOAPaymentsLimited/Atoa-CLI"
-VERSION="${ATOA_VERSION:-latest}"
+# The release workflow replaces "latest" with the release's own tag in the copy it
+# publishes, so an installer downloaded from a given release installs that release.
+RELEASE_TAG="latest"
+DOWNLOADS="${ATOA_DOWNLOAD_URL:-https://cli.atoa.me}"
+DOWNLOADS="${DOWNLOADS%/}"
 
 err() {
   echo "atoa install: $1" >&2
   exit 1
 }
+
+is_version() {
+  printf '%s' "$1" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+}
+
+VERSION="${ATOA_VERSION:-$RELEASE_TAG}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version)
+      [ $# -ge 2 ] || err "--version needs a value, e.g. --version 0.4.0"
+      VERSION="$2"
+      shift 2
+      ;;
+    --version=*)
+      VERSION="${1#--version=}"
+      shift
+      ;;
+    *) err "unknown option: $1 (supported: --version <version>)" ;;
+  esac
+done
+[ "$VERSION" = "latest" ] || is_version "$VERSION" \
+  || err "invalid version '$VERSION' (expected e.g. 0.4.0, v0.4.0 or latest)"
 
 # --- platform detection -----------------------------------------------------
 os="$(uname -s)"
@@ -51,19 +84,23 @@ command -v tar >/dev/null 2>&1 || err "need tar to unpack the download."
 # --- download tool ----------------------------------------------------------
 if command -v curl >/dev/null 2>&1; then
   dl() { curl -fsSL "$1" -o "$2"; }
+  fetch() { curl -fsSL "$1"; }
 elif command -v wget >/dev/null 2>&1; then
   dl() { wget -qO "$2" "$1"; }
+  fetch() { wget -qO- "$1"; }
 else
   err "need curl or wget to download."
 fi
 
-if [ -n "${ATOA_DOWNLOAD_URL:-}" ]; then
-  base="${ATOA_DOWNLOAD_URL%/}"
-elif [ "$VERSION" = "latest" ]; then
-  base="https://github.com/${REPO}/releases/latest/download"
-else
-  base="https://github.com/${REPO}/releases/download/v${VERSION#v}"
+# "latest" resolves to an exact version first, and every file then comes from that
+# version's folder, so an install never mixes files from two releases.
+if [ "$VERSION" = "latest" ]; then
+  latest="$(fetch "${DOWNLOADS}/latest/VERSION")" || err "could not read the latest version from ${DOWNLOADS}/latest/VERSION"
+  VERSION="$(printf '%s' "$latest" | tr -d '[:space:]')"
+  is_version "$VERSION" || err "unexpected latest version '$VERSION' from ${DOWNLOADS}/latest/VERSION"
 fi
+VERSION="v${VERSION#v}"
+base="${DOWNLOADS}/${VERSION}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM

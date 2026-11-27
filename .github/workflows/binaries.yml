@@ -5,10 +5,12 @@
 # 30-day workflow artifact (UAT builds).
 #
 # A `v*.*.*` tag also runs the `release` job: it attaches the archives, the two
-# installers, a GPG-signed SHA256SUMS and the GPG public key to a DRAFT GitHub
-# Release, records build provenance, and only then publishes it. So
-# `releases/latest/download/...` (what scripts/install.sh and scripts/install.ps1
-# pull from) never points at a release that is missing assets.
+# installers (stamped with the tag), a GPG-signed SHA256SUMS and the GPG public key
+# to a DRAFT GitHub Release, records build provenance, and only then publishes it.
+# The `publish-downloads` job then serves that release from cli.atoa.me (S3 +
+# CloudFront), which is where scripts/install.sh and scripts/install.ps1 download from:
+#   https://cli.atoa.me/v1.2.3/<file>   write-once, every release (rc included)
+#   https://cli.atoa.me/latest/<file>   the latest stable release, plus latest/VERSION
 #   v1.2.3        -> published; marked latest if it is the highest stable version
 #   v1.2.3-rc.1   -> published as a prerelease; never "latest", customers unaffected
 #
@@ -40,6 +42,7 @@ concurrency:
 
 env:
   PKG_VERSION: 6.26.1
+  CLI_DOWNLOADS_URL: https://cli.atoa.me
 
 jobs:
   build:
@@ -214,6 +217,8 @@ jobs:
       contents: write # create and publish the GitHub Release
       id-token: write # build provenance
       attestations: write # build provenance
+    outputs:
+      latest: ${{ steps.publish.outputs.latest }}
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.ref_name }}
@@ -239,9 +244,18 @@ jobs:
           path: out
           merge-multiple: true
 
+      # The attached installers carry this release's tag as their default version,
+      # so .../releases/download/<tag>/install.sh installs <tag>, while
+      # .../releases/latest/download/install.sh keeps installing the latest release.
       - name: Add installers, public key and checksums
         run: |
-          cp scripts/install.sh scripts/install.ps1 scripts/atoa-release-signing-key.asc out/
+          sed "s/^RELEASE_TAG=\"latest\"\$/RELEASE_TAG=\"$TAG\"/" scripts/install.sh > out/install.sh
+          sed "s/^  \$ReleaseTag = 'latest'\$/  \$ReleaseTag = '$TAG'/" scripts/install.ps1 > out/install.ps1
+          grep -qx "RELEASE_TAG=\"$TAG\"" out/install.sh \
+            || { echo "::error::could not stamp $TAG into install.sh"; exit 1; }
+          grep -qx "  \$ReleaseTag = '$TAG'" out/install.ps1 \
+            || { echo "::error::could not stamp $TAG into install.ps1"; exit 1; }
+          cp scripts/atoa-release-signing-key.asc out/
           cd out && sha256sum -- * > SHA256SUMS
 
       # Signs, then verifies against ONLY the committed public key, so a GPG_KEY_ID
@@ -299,14 +313,113 @@ jobs:
 
       # "latest" only moves forward: a hotfix on an older line stays out of the way.
       - name: Publish release
+        id: publish
         run: |
           case "$TAG" in
-            *-rc.*) gh release edit "$TAG" --draft=false --prerelease; exit 0 ;;
+            *-rc.*)
+              gh release edit "$TAG" --draft=false --prerelease
+              echo "latest=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
           esac
           published="$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName -q '.[].tagName')"
           highest="$(printf '%s\n%s\n' "$published" "$TAG" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
           if [ "$highest" = "$TAG" ]; then
             gh release edit "$TAG" --draft=false --latest
+            echo "latest=true" >> "$GITHUB_OUTPUT"
           else
             gh release edit "$TAG" --draft=false --latest=false
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Serves the release from https://cli.atoa.me/<tag>/ (write-once) and, when it is
+  # the latest stable version, https://cli.atoa.me/latest/. The files are pulled back
+  # from the published GitHub Release and checked against SHA256SUMS and their build
+  # attestations before upload, so the bucket only ever receives verified bytes.
+  # Runs once the bucket, role and distribution are configured as repository
+  # variables (CLI_DOWNLOADS_*); until then tag runs skip it.
+  publish-downloads:
+    needs: release
+    if: github.ref_type == 'tag' && vars.CLI_DOWNLOADS_BUCKET != ''
+    runs-on: ubuntu-latest
+    environment: release-signing # the AWS role only trusts this environment
+    permissions:
+      contents: read
+      id-token: write # assume the AWS role through OIDC
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      IS_LATEST: ${{ needs.release.outputs.latest }}
+      BUCKET: ${{ vars.CLI_DOWNLOADS_BUCKET }}
+      DISTRIBUTION_ID: ${{ vars.CLI_DOWNLOADS_DISTRIBUTION_ID }}
+    steps:
+      - name: Download and verify the published release
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D out
+          cd out
+          sha256sum -c SHA256SUMS
+          for f in *; do
+            gh attestation verify "$f" -R "$GITHUB_REPOSITORY" > /dev/null \
+              || { echo "::error::$f failed build-provenance verification"; exit 1; }
+          done
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.CLI_DOWNLOADS_ROLE_ARN }}
+          aws-region: ${{ vars.CLI_DOWNLOADS_REGION }}
+
+      # <tag>/ is write-once: S3 refuses to overwrite an existing key, and a re-run
+      # that finds identical bytes already there moves on. latest/ is replaced
+      # file by file, installers next and VERSION last, then its cache is cleared.
+      - name: Upload to cli.atoa.me
+        working-directory: out
+        run: |
+          content_type() {
+            case "$1" in
+              *.tar.gz) echo "application/gzip" ;;
+              *.zip) echo "application/zip" ;;
+              *) echo "text/plain; charset=utf-8" ;;
+            esac
+          }
+          upload() { # <key> <file> <cache-control> [write-once]
+            sum="$(openssl dgst -sha256 -binary "$2" | base64)"
+            set -- "$1" "$2" "$3" "${4:-}" "$sum"
+            if [ -n "$4" ]; then
+              if aws s3api put-object --bucket "$BUCKET" --key "$1" --body "$2" --if-none-match '*' \
+                --checksum-algorithm SHA256 --checksum-sha256 "$5" --content-type "$(content_type "$1")" \
+                --cache-control "$3" > /dev/null 2> "$RUNNER_TEMP/put.err"; then
+                return 0
+              fi
+              grep -q PreconditionFailed "$RUNNER_TEMP/put.err" || { cat "$RUNNER_TEMP/put.err"; return 1; }
+              existing="$(aws s3api head-object --bucket "$BUCKET" --key "$1" --checksum-mode ENABLED --query ChecksumSHA256 --output text)"
+              [ "$existing" = "$5" ] || { echo "::error::$1 already exists with different content"; return 1; }
+              return 0
+            fi
+            aws s3api put-object --bucket "$BUCKET" --key "$1" --body "$2" \
+              --checksum-algorithm SHA256 --checksum-sha256 "$5" --content-type "$(content_type "$1")" \
+              --cache-control "$3" > /dev/null
+          }
+          for f in *; do
+            upload "$TAG/$f" "$f" "public, max-age=31536000, immutable" write-once
+          done
+          if [ "$IS_LATEST" = "true" ]; then
+            for f in *; do
+              case "$f" in install.sh | install.ps1) continue ;; esac
+              upload "latest/$f" "$f" "public, max-age=300"
+            done
+            upload latest/install.sh install.sh "public, max-age=300"
+            upload latest/install.ps1 install.ps1 "public, max-age=300"
+            printf '%s\n' "$TAG" > "$RUNNER_TEMP/VERSION"
+            upload latest/VERSION "$RUNNER_TEMP/VERSION" "public, max-age=300"
+            invalidation="$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/latest/*' --query Invalidation.Id --output text)"
+            aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION_ID" --id "$invalidation"
+          fi
+
+      - name: Check cli.atoa.me serves this release
+        run: |
+          curl -fsS "$CLI_DOWNLOADS_URL/$TAG/SHA256SUMS" | cmp - out/SHA256SUMS
+          if [ "$IS_LATEST" = "true" ]; then
+            served="$(curl -fsS "$CLI_DOWNLOADS_URL/latest/VERSION" | tr -d '[:space:]')"
+            [ "$served" = "$TAG" ] || { echo "::error::$CLI_DOWNLOADS_URL/latest/VERSION says '$served', expected $TAG"; exit 1; }
           fi

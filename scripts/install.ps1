@@ -1,18 +1,27 @@
 #Requires -Version 5.1
 # Atoa CLI installer for Windows.
 #
-#   irm https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.ps1 | iex
+#   Latest:           irm https://cli.atoa.me/latest/install.ps1 | iex
+#   A given version:  irm https://cli.atoa.me/v0.4.0/install.ps1 | iex
+#              or:    & ([scriptblock]::Create((irm https://cli.atoa.me/latest/install.ps1))) -Version 0.4.0
 #
-# Downloads atoa.exe for your CPU (zipped) from the GitHub Release, verifies
-# its checksum and Authenticode signature, and installs it onto your PATH.
+# Downloads atoa.exe for your CPU (zipped), verifies its checksum and
+# Authenticode signature, and installs it onto your PATH.
 # No Node.js required. Re-run it to upgrade. Non-interactive: safe for CI and AI
 # agents (`powershell -c "irm ... | iex"` exits 1 on any failure).
 #
+# Version, first match wins: -Version, then $env:ATOA_VERSION, then the release
+# this installer was downloaded from.
+#
 # Environment overrides:
-#   $env:ATOA_VERSION         version to install (e.g. 0.4.0 or v0.4.0). Default: latest.
+#   $env:ATOA_VERSION         version to install (e.g. 0.4.0 or v0.4.0).
 #   $env:ATOA_INSTALL_DIR     target directory. Default: %LOCALAPPDATA%\Atoa\bin.
 #   $env:ATOA_NO_MODIFY_PATH  set to 1 to never edit the User PATH.
-#   $env:ATOA_DOWNLOAD_URL    download from this base URL instead of GitHub (a mirror).
+#   $env:ATOA_DOWNLOAD_URL    download from a mirror with the same layout as cli.atoa.me
+#                             (<url>/latest/VERSION, <url>/v<version>/<file>). GitHub works
+#                             for a given version:
+#                             https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/download
+param([string]$Version)
 
 # Everything runs in a child scope and fails with `throw`, never `exit`: under
 # `irm | iex` this script runs inside the caller's session, so `exit` would close
@@ -22,8 +31,15 @@
   $ProgressPreference = 'SilentlyContinue' # the progress bar makes 5.1 downloads crawl
   Set-StrictMode -Version Latest
 
-  $Repo = 'ATOAPaymentsLimited/Atoa-CLI'
-  $Version = if ($env:ATOA_VERSION) { $env:ATOA_VERSION } else { 'latest' }
+  # The release workflow replaces 'latest' with the release's own tag in the copy it
+  # publishes, so an installer downloaded from a given release installs that release.
+  $ReleaseTag = 'latest'
+  $Downloads = if ($env:ATOA_DOWNLOAD_URL) { $env:ATOA_DOWNLOAD_URL.TrimEnd('/') } else { 'https://cli.atoa.me' }
+  $VersionPattern = '^v?\d+\.\d+\.\d+(-rc\.\d+)?$'
+  $Version = if ($Version) { $Version } elseif ($env:ATOA_VERSION) { $env:ATOA_VERSION } else { $ReleaseTag }
+  if ($Version -ne 'latest' -and $Version -notmatch $VersionPattern) {
+    throw "atoa install: invalid version '$Version' (expected e.g. 0.4.0, v0.4.0 or latest)"
+  }
 
   # --- platform detection ---------------------------------------------------
   # 32-bit PowerShell on 64-bit Windows reports x86; the real CPU is in ...W6432.
@@ -37,17 +53,26 @@
   $asset = "atoa-windows-$arch.zip"
   $sums = 'SHA256SUMS'
 
-  # --- resolve download base ------------------------------------------------
-  if ($env:ATOA_DOWNLOAD_URL) {
-    $base = $env:ATOA_DOWNLOAD_URL.TrimEnd('/')
-  } elseif ($Version -eq 'latest') {
-    $base = "https://github.com/$Repo/releases/latest/download"
-  } else {
-    $base = "https://github.com/$Repo/releases/download/v$($Version.TrimStart('v'))"
-  }
-
   # Add TLS 1.2 without removing what the caller's session already allows.
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+  # --- resolve download base ------------------------------------------------
+  # "latest" resolves to an exact version first, and every file then comes from
+  # that version's folder, so an install never mixes files from two releases.
+  if ($Version -eq 'latest') {
+    try {
+      $latest = (Invoke-WebRequest -Uri "$Downloads/latest/VERSION" -UseBasicParsing).Content
+    } catch {
+      throw "atoa install: could not read the latest version from $Downloads/latest/VERSION: $($_.Exception.Message)"
+    }
+    if ($latest -is [byte[]]) { $latest = [Text.Encoding]::UTF8.GetString($latest) }
+    $Version = "$latest".Trim()
+    if ($Version -notmatch $VersionPattern) {
+      throw "atoa install: unexpected latest version '$Version' from $Downloads/latest/VERSION"
+    }
+  }
+  $Version = "v$($Version.TrimStart('v'))"
+  $base = "$Downloads/$Version"
 
   $tmp = Join-Path $env:TEMP ('atoa-install-' + [Guid]::NewGuid())
   New-Item -ItemType Directory -Path $tmp | Out-Null
