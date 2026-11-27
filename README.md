@@ -14,11 +14,44 @@ atoa webhooks trigger PAYMENTS_STATUS       # fire a fake event at your sandbox 
 
 ## Install
 
+One command, no Node.js needed. It downloads the signed standalone binary for your OS and CPU,
+verifies its checksum, puts `atoa` on your PATH, and upgrades in place when re-run.
+
+**macOS / Linux**
+
+```bash
+curl -fsSL https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.sh | sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.ps1 | iex
+```
+
+Binaries ship for Windows x64, macOS (Apple silicon and Intel) and Linux x64/arm64, including
+Alpine. They are code-signed (Authenticode on Windows, Developer ID and notarized on macOS), and
+every release carries a GPG-signed `SHA256SUMS` and GitHub build provenance
+(`gh attestation verify <file> -R ATOAPaymentsLimited/Atoa-CLI`). Import the release key
+(`atoa-release-signing-key.asc`, attached to every release, fingerprint
+`CD41 B3FD 0E27 808C AF7D 7BDF 5C3C BA69 5F1B E613`) with `gpg --import` and `install.sh` then
+refuses any download that isn't signed by it.
+
+The installers are non-interactive, so they work in CI and for AI agents. Optional environment
+variables:
+
+| Variable | Effect |
+|---|---|
+| `ATOA_VERSION` | Install a specific version (e.g. `0.4.0`) instead of the latest. |
+| `ATOA_INSTALL_DIR` | Install somewhere else. Default: `/usr/local/bin` or `~/.local/bin`; `%LOCALAPPDATA%\Atoa\bin` on Windows. |
+| `ATOA_NO_MODIFY_PATH` | Set to `1` to leave shell startup files and the User PATH untouched. |
+| `ATOA_DOWNLOAD_URL` | Download from a mirror instead of GitHub Releases. |
+
+**With npm** (requires Node.js 20 or later):
+
 ```bash
 npm install -g @atoapayments/atoa-cli
 ```
-
-**Requires Node.js 20 or later** (`node --version`).
 
 Verify:
 
