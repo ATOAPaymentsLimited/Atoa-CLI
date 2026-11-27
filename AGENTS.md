@@ -10,12 +10,15 @@ so run the absolute path the installer prints on its `Installed atoa -> …` lin
 shell), and check it with `--version`:
 
 ```
-curl -fsSL https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.sh | sh
+curl -fsSL https://cli.atoa.me/latest/install.sh | sh
 ```
 
 ```
-powershell -c "irm https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.ps1 | iex"
+powershell -c "irm https://cli.atoa.me/latest/install.ps1 | iex"
 ```
+
+To install a specific version, use its folder instead of `latest`, e.g.
+`https://cli.atoa.me/v0.4.0/install.sh`.
 
 If Node.js 20+ is available you can skip installing: `npx -y @atoapayments/atoa-cli@latest <command>`.
 

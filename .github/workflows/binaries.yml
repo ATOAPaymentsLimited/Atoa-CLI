@@ -245,8 +245,8 @@ jobs:
           merge-multiple: true
 
       # The attached installers carry this release's tag as their default version,
-      # so .../releases/download/<tag>/install.sh installs <tag>, while
-      # .../releases/latest/download/install.sh keeps installing the latest release.
+      # so cli.atoa.me/<tag>/install.sh installs <tag> and cli.atoa.me/latest/install.sh
+      # (the latest release's copy) installs the latest.
       - name: Add installers, public key and checksums
         run: |
           sed "s/^RELEASE_TAG=\"latest\"\$/RELEASE_TAG=\"$TAG\"/" scripts/install.sh > out/install.sh

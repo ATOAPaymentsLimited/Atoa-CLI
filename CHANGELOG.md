@@ -13,10 +13,13 @@ Accurate failure reporting, and `signup` / `bank add` runnable without a termina
 
 - **Standalone binaries and one-command install**: no Node.js needed. Every release attaches signed
   binaries for Windows x64, macOS arm64/x64 and Linux x64/arm64 (static, so Alpine works too) as
-  25–36 MB `.tar.gz` / `.zip` downloads, plus `install.sh` and `install.ps1`, a GPG-signed
-  `SHA256SUMS` and build provenance. Install
-  with `curl -fsSL …/releases/latest/download/install.sh | sh` or
-  `irm …/releases/latest/download/install.ps1 | iex`. The npm package now publishes with provenance.
+  25–37 MB `.tar.gz` / `.zip` downloads, plus `install.sh` and `install.ps1`, a GPG-signed
+  `SHA256SUMS` and build provenance, served from `https://cli.atoa.me/latest/` and
+  `https://cli.atoa.me/v<version>/`. Install with
+  `curl -fsSL https://cli.atoa.me/latest/install.sh | sh` or
+  `irm https://cli.atoa.me/latest/install.ps1 | iex`; pin a version with its folder
+  (`/v0.4.0/install.sh`), `--version` / `-Version`, or `ATOA_VERSION`. The npm package now
+  publishes with provenance.
 - **A flag for every prompted value on `signup`**, so it can run with no terminal: `--otp`,
   `--accept-terms`, `--marketing`, `--start-new`, and one for each onboarding field. It runs as two
   invocations — the first sends the one-time code, the second carries it plus every value.

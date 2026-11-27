@@ -20,17 +20,43 @@ verifies its checksum, puts `atoa` on your PATH, and upgrades in place when re-r
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.sh | sh
+curl -fsSL https://cli.atoa.me/latest/install.sh | sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/latest/download/install.ps1 | iex
+irm https://cli.atoa.me/latest/install.ps1 | iex
 ```
 
+**A specific version.** Every release has its own folder, and its installer installs that
+version:
+
+```bash
+curl -fsSL https://cli.atoa.me/v0.4.0/install.sh | sh
+```
+
+```powershell
+irm https://cli.atoa.me/v0.4.0/install.ps1 | iex
+```
+
+Or pass a version to the latest installer:
+
+```bash
+curl -fsSL https://cli.atoa.me/latest/install.sh | sh -s -- --version 0.4.0
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://cli.atoa.me/latest/install.ps1))) -Version 0.4.0
+```
+
+Each release's files are at `https://cli.atoa.me/v<version>/` (and the latest at
+`https://cli.atoa.me/latest/`): the installers, the archives, `SHA256SUMS`, `SHA256SUMS.asc` and
+the release key. The same files are attached to the
+[GitHub Release](https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases).
+
 Binaries ship for Windows x64, macOS (Apple silicon and Intel) and Linux x64/arm64, including
-Alpine, as a 25–36 MB download (`atoa-<os>-<arch>.tar.gz`, or `atoa-windows-x64.zip`) that
+Alpine, as a 25–37 MB download (`atoa-<os>-<arch>.tar.gz`, or `atoa-windows-x64.zip`) that
 unpacks to a single `atoa` / `atoa.exe`. They are code-signed (Authenticode on Windows, Developer
 ID and notarized on macOS), and every release carries a GPG-signed `SHA256SUMS` and GitHub build
 provenance for both the download and the binary inside it
@@ -44,10 +70,10 @@ variables:
 
 | Variable | Effect |
 |---|---|
-| `ATOA_VERSION` | Install a specific version (e.g. `0.4.0`) instead of the latest. |
+| `ATOA_VERSION` | Install a specific version (e.g. `0.4.0`). `--version` / `-Version` take precedence. |
 | `ATOA_INSTALL_DIR` | Install somewhere else. Default: `/usr/local/bin` or `~/.local/bin`; `%LOCALAPPDATA%\Atoa\bin` on Windows. |
 | `ATOA_NO_MODIFY_PATH` | Set to `1` to leave shell startup files and the User PATH untouched. |
-| `ATOA_DOWNLOAD_URL` | Download from a mirror instead of GitHub Releases. |
+| `ATOA_DOWNLOAD_URL` | Download from a mirror laid out like `cli.atoa.me`. GitHub Releases works with a version set: `https://github.com/ATOAPaymentsLimited/Atoa-CLI/releases/download`. |
 
 **With npm** (requires Node.js 20 or later):
 
