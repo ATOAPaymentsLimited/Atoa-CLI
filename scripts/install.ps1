@@ -76,9 +76,14 @@
     Write-Host 'Checksum OK.'
 
     # --- verify Authenticode signature --------------------------------------
+    # Valid alone would accept any publisher's certificate, so the signer must be
+    # Atoa. Match the organization, not a thumbprint: the certificates rotate often.
     $sig = Get-AuthenticodeSignature (Join-Path $tmp $asset)
     if ($sig.Status -ne 'Valid') {
       throw "atoa install: Authenticode signature not valid (status: $($sig.Status)). Aborting."
+    }
+    if ($sig.SignerCertificate.Subject -notmatch '(^|,\s*)O=Atoa Payments Limited(,|$)') {
+      throw "atoa install: signed by '$($sig.SignerCertificate.Subject)', not Atoa Payments Limited. Aborting."
     }
     Write-Host "Authenticode signature OK ($($sig.SignerCertificate.Subject))."
 
